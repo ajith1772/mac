@@ -1,0 +1,2733 @@
+<!DOCTYPE html>
+<html lang="ml">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SCREEN TO SEEN — Dynamic Slide Studio (White Minimalist + Firebase)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Sans+Malayalam:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@600;700;800;900&display=swap" rel="stylesheet" />
+
+  <!-- Firebase Compat SDKs (App + Firestore) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', '"Inter"', '"Noto Sans Malayalam"', 'sans-serif'],
+            ml: ['"Noto Sans Malayalam"', '"Plus Jakarta Sans"', 'sans-serif'],
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background-color: #ffffff;
+      color: #0f172a;
+      font-family: 'Plus Jakarta Sans', 'Inter', 'Noto Sans Malayalam', sans-serif;
+      overflow-x: hidden;
+      height: 100%;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+    body.grayscale-demo {
+      filter: grayscale(100%) contrast(1.1);
+      transition: filter 0.4s ease;
+    }
+    body { transition: filter 0.4s ease; }
+
+    .minimal-grid-bg {
+      background-image:
+        radial-gradient(circle at 10% 15%, rgba(37, 99, 235, 0.04) 0%, transparent 40%),
+        radial-gradient(circle at 90% 85%, rgba(79, 70, 229, 0.04) 0%, transparent 45%),
+        linear-gradient(to right, rgba(226, 232, 240, 0.6) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(226, 232, 240, 0.6) 1px, transparent 1px);
+      background-size: 100% 100%, 100% 100%, 64px 64px, 64px 64px;
+    }
+    .slide-container {
+      display: none;
+      position: relative;
+      animation: slideFadeIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    .slide-container.active {
+      display: flex;
+    }
+    @keyframes slideFadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .minimal-card {
+      background: rgba(255, 255, 255, 0.94);
+      border: 1.5px solid #e2e8f0;
+      box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05);
+    }
+    .minimal-card-alt {
+      background: rgba(248, 250, 252, 0.94);
+      border: 1.5px solid #e2e8f0;
+    }
+    .draw-line {
+      stroke-dasharray: 1000;
+      stroke-dashoffset: 1000;
+      animation: dashDraw 1.1s ease-out forwards;
+    }
+    .draw-line-delay-1 { animation-delay: 0.3s; }
+    .draw-line-delay-2 { animation-delay: 0.65s; }
+    .draw-line-delay-3 { animation-delay: 1.0s; }
+    @keyframes dashDraw { to { stroke-dashoffset: 0; } }
+
+    ::selection { background: #2563eb; color: #ffffff; }
+
+    .drag-over-card {
+      border: 2px dashed #2563eb !important;
+      background-color: #eff6ff !important;
+      transform: scale(1.02);
+    }
+    .slide-bg-layer {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      background-size: cover;
+      background-position: center;
+      pointer-events: none;
+      transition: opacity 0.35s ease, background-image 0.35s ease;
+    }
+
+    /* Live 9-Dot Connection Pop Animation */
+    .dot-connected {
+      transition: fill 0.25s ease, stroke 0.25s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      transform-box: fill-box;
+      transform-origin: center;
+      transform: scale(1.18);
+    }
+    @keyframes penPulse {
+      0%, 100% { r: 10; opacity: 0.45; }
+      50% { r: 16; opacity: 0.12; }
+    }
+    .pen-halo {
+      animation: penPulse 0.9s infinite ease-in-out;
+    }
+    
+  </style>
+</head>
+<body class="minimal-grid-bg text-slate-900 flex flex-col min-h-screen">
+
+  <!-- Dynamic Slide Background Image Overlay -->
+  <div id="slideBgLayer" class="slide-bg-layer opacity-0"></div>
+
+  <!-- Toast Notification -->
+  <div id="toastNotification" class="hidden fixed bottom-20 right-5 z-[100] px-5 py-3 rounded-2xl bg-slate-900 text-white text-sm font-bold shadow-2xl border border-slate-700 flex items-center gap-2.5 max-w-md">
+    <span id="toastIcon">✅</span>
+    <span id="toastMsg">Saved successfully!</span>
+  </div>
+
+  <!-- Top Progress Bar -->
+  <div class="fixed top-0 left-0 right-0 h-2 bg-slate-100 z-50">
+    <div id="progressBar" class="h-full bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-600 transition-all duration-300" style="width: 4%;"></div>
+  </div>
+
+  <!-- Top Stage Header Bar -->
+  <header class="w-full px-4 sm:px-6 pt-3.5 pb-2.5 flex flex-wrap items-center justify-between gap-2 z-40 border-b border-slate-200 bg-white/95 backdrop-blur-md shadow-sm relative">
+    <div class="flex items-center gap-3">
+      <span class="inline-flex items-center justify-center w-9 h-9 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 font-black text-sm">S2S</span>
+      <div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-sm font-extrabold tracking-wider uppercase text-slate-900">SCREEN TO SEEN</span>
+          <button onclick="openFirebaseModal()" id="cloudStatusPill" class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-300 hover:bg-blue-50 hover:text-blue-700 transition" title="Configure Firebase Cloud Backend">
+            💾 Local Mode • Connect Firebase
+          </button>
+        </div>
+        <div id="headerSegmentLabel" class="text-xs text-blue-600 font-semibold truncate max-w-[220px] sm:max-w-md">Intro • Masterclass Title</div>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+      <!-- Live Grayscale Status Pill -->
+      <button id="headerGrayscaleBadge" onclick="toggleGrayscaleMode()" class="hidden px-2.5 py-1.5 rounded-lg bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold animate-pulse">
+        Grayscale ON (Reset)
+      </button>
+
+      <!-- Add Slide Button -->
+      <button onclick="openSlideEditorModal()" class="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-sm transition">
+        <span>＋</span><span>Add Slide</span>
+      </button>
+
+      <!-- Current Slide Image Manager -->
+      <button onclick="openImageManagerForCurrentSlide()" title="Add/Change Concerned or Background Image for Current Slide" class="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs sm:text-sm font-bold flex items-center gap-1.5 transition">
+        <span>🖼️</span><span class="hidden sm:inline">Slide Image</span>
+      </button>
+
+      <!-- Reorder / All Slides Button -->
+      <button onclick="toggleOverviewModal()" title="Manage & Reorder Slides (G)" class="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5 transition">
+        <span>⇅</span><span class="hidden md:inline">Manage &amp; Reorder</span>
+      </button>
+
+      <!-- Speaker Script Drawer Toggle -->
+      <button onclick="toggleSpeakerNotes()" id="notesToggleBtn" title="Toggle Speaker Script (N)" class="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5 transition">
+        <span>🎙️</span><span class="hidden lg:inline">Script</span>
+      </button>
+
+      <!-- Fullscreen Toggle -->
+      <button onclick="toggleFullscreen()" title="Toggle Fullscreen (F)" class="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-800 transition">
+        <svg class="w-4 h-4 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Stage Workspace -->
+  <div class="flex-1 flex overflow-hidden relative z-10">
+
+    <!-- Slides Viewport -->
+    <main id="slidesViewport" class="flex-1 overflow-y-auto px-4 sm:px-8 lg:px-12 py-6 sm:py-8 flex items-center justify-center">
+      <div id="slidesStage" class="w-full max-w-6xl mx-auto">
+
+        <!-- ==================== SLIDE 1 ==================== -->
+        <section class="slide-container active flex-col items-center text-center justify-center min-h-[74vh]" data-slide-id="builtin-1" data-segment="Masterclass Title • 00:00">
+          <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-xs sm:text-sm font-bold tracking-widest uppercase mb-6">
+            <span>⚡ Plus One &amp; Plus Two Youth Masterclass • 45 Minutes</span>
+          </div>
+          <h1 class="text-5xl sm:text-7xl lg:text-8xl font-black tracking-tight text-slate-900 mb-6 leading-tight">
+            SCREEN <span class="text-blue-600">TO SEEN</span>
+          </h1>
+          
+          <div class="minimal-card rounded-3xl p-6 sm:p-8 max-w-3xl w-full">
+            <p class="font-ml text-xl sm:text-3xl font-bold text-slate-800 leading-relaxed">
+              &#34;Don’t just be Follower in reel life! <br class="hidden sm:inline" /> Become a shining protagonist in real life!&#34;
+            </p>
+            <div class="mt-6 pt-6 border-t border-slate-100 flex flex-wrap items-center justify-center gap-3 text-xs sm:text-sm">
+              <span class="px-3.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-bold border border-blue-100">🧠 Neuroscience &amp; Attention</span>
+              <span class="px-3.5 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 font-bold border border-indigo-100">🛡️ Cyber &amp; Financial Safety</span>
+              <span class="px-3.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 font-bold border border-emerald-100">🤖 Smart AI &amp; Focus Hacks</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 2 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-2" data-segment="Segment 1 • Killer Opening Hook (00:00–02:30)">
+          <div class="flex items-center gap-3 mb-4">
+            <span class="px-3 py-1 rounded-lg bg-blue-100 text-blue-800 text-xs font-bold uppercase">Segment 01 • 00:00 – 02:30 Min</span>
+            <span class="text-slate-700 text-xs sm:text-sm font-semibold">No Moral Policing • Curiosity Gap</span>
+          </div>
+          <h2 class="text-4xl sm:text-5xl lg:text-6xl font-black text-slate-900 mb-6 leading-tight">
+            Who Wants to <span class="text-blue-600">Leave First?</span> 🚪
+          </h2>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+            <div class="minimal-card rounded-3xl p-6 sm:p-8 border-l-4 border-l-blue-600 flex flex-col justify-center">
+              <div class="text-xs uppercase tracking-wider text-blue-600 font-bold mb-2">Stage Truth #1</div>
+              <p class="font-ml text-xl sm:text-2xl font-bold text-slate-800 leading-relaxed mb-4">
+                &#34;I’m the one who wants to finish this session as quickly as possible and get out of here... but you’re the one who wants to open that door and bolt even sooner, aren’t you ?&#34;
+              </p>
+              <p class="font-ml text-slate-700 text-base sm:text-lg">
+                No moral policing here! Just a quick brain-teaser to tackle before you make a dash for the door !!
+              </p>
+            </div>
+            <div class="minimal-card-alt rounded-3xl p-6 sm:p-8 flex flex-col justify-between">
+              <div>
+                <h3 class="text-sm font-bold text-indigo-700 uppercase tracking-wider mb-4">Today’s 45-Minute Mission</h3>
+                <ul class="space-y-3 font-ml text-base sm:text-lg text-slate-700">
+                  <li class="flex items-start gap-3"><span class="text-blue-600 font-black">01.</span> <span>The Invisible Rules of the Brain (Lateral Thinking)</span></li>
+                  <li class="flex items-start gap-3"><span class="text-blue-600 font-black">02.</span> <span>Silicon Valley’s ‘Pocket Casino’ Secrets</span></li>
+                  <li class="flex items-start gap-3"><span class="text-blue-600 font-black">03.</span> <span>Phishing, Money Mules, and AI</span></li>
+                  <li class="flex items-start gap-3"><span class="text-blue-600 font-black">04.</span> <span>3 Weapons to Defeat the Algorithm</span></li>
+                </ul>
+              </div>
+              <div class="mt-6 pt-4 border-t border-slate-200 text-blue-700 font-extrabold text-sm sm:text-base">
+                👉 Ready for Challenge #1? Let&#39;s test your brain!
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 3 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-3" data-segment="Segment 2 • Challenge 1: 3-Line Lateral Slice (02:30–05:00)">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <span class="px-3 py-1 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold uppercase">Segment 02 • Challenge 01</span>
+            <span class="px-3 py-1 rounded-lg bg-amber-50 border border-amber-300 text-amber-800 text-xs font-bold">⏱️ 30 Seconds Audience Brain Teaser</span>
+          </div>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-2">
+            Challenge 1: <span class="text-blue-600">The 3-Line Lateral Slice</span>
+          </h2>
+          <p class="font-ml text-lg sm:text-xl text-slate-700 mb-6">
+             <strong>കൈയെടുക്കാതെ </strong>, കൃത്യം <strong>3 നേർവരകൾ</strong> കൊണ്ട് ഈ 9 ഡോട്ടുകളെയും സ്പർശിക്കാമോ?
+          </p>
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+            <div class="lg:col-span-7 minimal-card rounded-3xl p-5 sm:p-6 flex flex-col items-center">
+              <div class="w-full flex flex-wrap items-center justify-between gap-2 mb-3 text-xs sm:text-sm">
+                <span class="text-slate-600 font-semibold">Click &amp; drag to try, or watch live drawing</span>
+                <div class="flex items-center gap-2">
+                  <span id="puzzle1DotCounter" class="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-bold border border-emerald-200">Dots: 0 / 9</span>
+                  <span id="puzzle1LineCounter" class="px-2.5 py-1 rounded-lg bg-slate-100 text-blue-700 font-bold border border-slate-200">Lines: 0 / 3</span>
+                </div>
+              </div>
+
+              <!-- 600x300 Exact Geometry Board (All 9 dots r=16 pierced continuously) -->
+              <svg id="svgPuzzle1" viewBox="0 0 600 300" class="w-full h-64 sm:h-80 bg-slate-50 rounded-2xl border-2 border-slate-200 cursor-crosshair touch-none shadow-inner">
+                <!-- Subtle Imaginary Box Reference -->
+                <rect x="216" y="66" width="168" height="168" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,6" opacity="0.55" />
+
+                <!-- 9 Physical Dots (r = 16, exact 68px square grid centered at 300,150) -->
+                <g id="p1DotsGroup">
+                  <!-- Row 1 -->
+                  <circle id="p1-dot-1" cx="232" cy="82" r="16" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <circle id="p1-dot-2" cx="300" cy="82" r="16" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <circle id="p1-dot-3" cx="368" cy="82" r="16" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <!-- Row 2 -->
+                  <circle id="p1-dot-4" cx="232" cy="150" r="16" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <circle id="p1-dot-5" cx="300" cy="150" r="16" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <circle id="p1-dot-6" cx="368" cy="150" r="16" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <!-- Row 3 -->
+                  <circle id="p1-dot-7" cx="232" cy="218" r="16" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <circle id="p1-dot-8" cx="300" cy="218" r="16" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <circle id="p1-dot-9" cx="368" cy="218" r="16" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                </g>
+
+                <!-- User manual drawn lines -->
+                <g id="p1UserLines"></g>
+
+                <!-- Animated 3-Line Continuous Solution (drawn live via JS requestAnimationFrame) -->
+                <g id="p1SolutionLines">
+                  <line id="p1-sol-1" x1="198" y1="64" x2="198" y2="64" stroke="#2563eb" stroke-width="4.5" stroke-linecap="round" class="hidden" />
+                  <line id="p1-sol-2" x1="492.7" y1="116" x2="492.7" y2="116" stroke="#7c3aed" stroke-width="4.5" stroke-linecap="round" class="hidden" />
+                  <line id="p1-sol-3" x1="107.3" y1="184" x2="107.3" y2="184" stroke="#059669" stroke-width="4.5" stroke-linecap="round" class="hidden" />
+                </g>
+
+                <!-- Corner Turn Markers (appear when pen turns outside the box) -->
+                <g id="p1Turn1Badge" class="hidden">
+                  <circle cx="492.7" cy="116" r="6" fill="#2563eb" stroke="#ffffff" stroke-width="2" />
+                  <rect x="498" y="96" width="76" height="22" rx="6" fill="#1e293b" />
+                  <text x="536" y="111" text-anchor="middle" fill="#ffffff" font-size="10.5" font-weight="800">Turn 1 ↩</text>
+                </g>
+                <g id="p1Turn2Badge" class="hidden">
+                  <circle cx="107.3" cy="184" r="6" fill="#7c3aed" stroke="#ffffff" stroke-width="2" />
+                  <rect x="24" y="164" width="76" height="22" rx="6" fill="#1e293b" />
+                  <text x="62" y="179" text-anchor="middle" fill="#ffffff" font-size="10.5" font-weight="800">↪ Turn 2</text>
+                </g>
+
+                <!-- Live Animated Pen Tip -->
+                <g id="p1PenTip" class="hidden" transform="translate(198, 64)">
+                  <circle cx="0" cy="0" r="12" fill="#2563eb" class="pen-halo" />
+                  <circle cx="0" cy="0" r="5.5" fill="#ffffff" stroke="#0f172a" stroke-width="2.5" />
+                </g>
+              </svg>
+
+              <div class="flex flex-wrap items-center justify-center gap-3 mt-4">
+                <button onclick="resetPuzzle1()" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs sm:text-sm font-bold border border-slate-300 transition">↺ Clear Board</button>
+                <button id="revealP1Btn" onclick="revealPuzzle1()" class="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-black shadow transition">✨ Reveal 3-Line Solution</button>
+              </div>
+            </div>
+            <div class="lg:col-span-5 minimal-card rounded-3xl p-6 space-y-4">
+              <h3 class="text-xl font-bold text-slate-900">നിബന്ധനകൾ (Rules):</h3>
+              <ul class="space-y-3 font-ml text-slate-700 text-base">
+                <li class="p-3.5 rounded-xl bg-slate-50 border border-slate-200">1️⃣ <strong>കൈയെടുക്കരുത്:</strong> തുടർച്ചയായ 3 നേർവരകൾ മാത്രം.</li>
+                <li class="p-3.5 rounded-xl bg-slate-50 border border-slate-200">2️⃣ <strong>9 ഡോട്ടുകളും:</strong> എല്ലാ ഡോട്ടുകളെയും വരകൾ സ്പർശിക്കണം.</li>
+                
+              </ul>
+              <div id="p1HintBanner" class="hidden p-4 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 font-ml text-sm font-semibold">
+                💡 <strong>Secret:</strong> Physical Thickness ! മുകൾ അറ്റം, മധ്യഭാഗം, താഴത്തെ അറ്റം എന്നിവയിലൂടെ 3 വരകൾ കടന്നുപോകുന്നു!<br> <br><br>
+                <ul class="space-y-3 font-ml text-slate-700 text-base">
+                <li class="p-3.5 rounded-xl bg-slate-50 border border-slate-200"> ? <strong>ശ്രദ്ധിക്കൂ:</strong> ചോദ്യത്തിൽ പറയാത്ത നിയമങ്ങൾ നിങ്ങൾ സ്വയം ഉണ്ടാക്കുന്നുണ്ടോ?</li>
+              </ul>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 4 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-4" data-segment="Segment 2 Reveal • Physical Thickness Insight">
+          <div class="mb-3"><span class="px-3 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold uppercase">Segment 02 • Lateral Thinking Insight</span></div>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-6">Physical <span class="text-blue-600">Thickness !</span> </h2>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="minimal-card rounded-3xl p-6 sm:p-8 border-t-4 border-t-blue-600">
+              <h3 class="text-xl font-bold text-blue-700 mb-4">എങ്ങനെയാണ് 3 വരകൾ സാധ്യമായത്?</h3>
+              <ul class="space-y-3 font-ml text-slate-700 text-base sm:text-lg">
+                <li>🔹 കടലാസിലോ സ്ക്രീനിലോ വരയ്ക്കുന്ന ഡോട്ടുകൾ പൂജ്യം വ്യാസമുള്ള ബിന്ദുക്കളല്ല; അവയ്ക്ക് <strong>Physical Radius</strong> ഉണ്ട്.</li>
+                <li>🔹 <strong>വര 1:</strong> ആദ്യ വരിയിലെ 3 ഡോട്ടുകളുടെ <strong>മുകൾ അറ്റം (Top Edge)</strong> സ്പർശിക്കുന്നു.</li>
+                <li>🔹 <strong>വര 2:</strong> ഇടതുവശത്ത് പുറത്തുനിന്ന് തിരിഞ്ഞ് നടുവിലെ വരിയുടെ <strong>മധ്യത്തിലൂടെ (Center)</strong> പോകുന്നു.</li>
+                <li>🔹 <strong>വര 3:</strong> താഴത്തെ വരിയുടെ <strong>അടിഭാഗം (Bottom Edge)</strong> സ്പർശിക്കുന്നു.</li>
+              </ul>
+            </div>
+            <div class="minimal-card rounded-3xl p-6 sm:p-8 border-t-4 border-t-indigo-600 flex flex-col justify-between">
+              <div>
+                <h3 class="text-xl font-bold text-indigo-700 mb-4">Invisible Limits:</h3>
+                <p class="font-ml text-slate-700 text-base sm:text-lg mb-4">ചോദ്യത്തിൽ <em>&#34;ഡോട്ടിന്റെ നടുവിലൂടെ വരയ്ക്കണം&#34;</em> എന്ന് ആരും പറഞ്ഞിരുന്നില്ല. എന്നിട്ടും നമ്മൾ സ്വന്തമായി നിയമങ്ങൾ ഉണ്ടാക്കി:</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 font-ml text-sm text-rose-800 mb-4">
+                  <div class="p-3 rounded-xl bg-rose-50 border border-rose-200 font-semibold">&#34;ഞാൻ ശ്രമിച്ചാലും ഒന്നും മാറില്ല.&#34;</div>
+                  <div class="p-3 rounded-xl bg-rose-50 border border-rose-200 font-semibold">&#34;എന്റെ അഭിപ്രായങ്ങൾക്ക് വിലയില്ല.&#34;</div>
+                  <div class="p-3 rounded-xl bg-rose-50 border border-rose-200 font-semibold">&#34;ഞാൻ എപ്പോഴും പിന്നിലാണ്.&#34;</div>
+                  <div class="p-3 rounded-xl bg-rose-50 border border-rose-200 font-semibold">&#34;എനിക്ക് പ്രത്യേക കഴിവില്ല.&#34;</div>
+                </div>
+              </div>
+              <div class="p-4 rounded-xl bg-rose--50 border border-rose-200 text-center font-semibold text-rose-900 text-base sm:text-lg">Lateral Thinking : &#34;പറയാത്ത പരിധികൾ സ്വയം സൃഷ്ടിക്കാതിരിക്കുന്നതാണ് യഥാർത്ഥ പാർശ്വ ചിന്ത ! &#34;</div><br><br>
+               <a href="https://en.wikipedia.org/wiki/Lateral_thinking" target="_blank" rel="noopener noreferrer"
+                class="text-blue-600 underline font-bold hover:text-blue-800">
+                Lateral Thinking (1967) </a>
+                <a href="https://en.wikipedia.org/wiki/Vertical_thinking" target="_blank" rel="noopener noreferrer"
+                class="text-blue-600 underline font-bold hover:text-blue-800">
+                Vertical Thinking </a>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 5 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-5" data-segment="Segment 3 • Challenge 2: 4-Line Box-Break (05:00–08:00)">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <span class="px-3 py-1 rounded-lg bg-amber-50 border border-amber-300 text-amber-800 text-xs font-bold uppercase">Segment 03 • Challenge 02</span>
+            <span class="px-3 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold">🙋 Stage Volunteer Challenge</span>
+          </div>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-2">Challenge 2: <span class="text-amber-600">Classic 4-Line Box-Break</span></h2>
+          <p class="font-ml text-lg sm:text-xl text-slate-700 mb-6">9 ഡോട്ടുകളുടെയും <strong>കൃത്യം നടുവിലൂടെ </strong> കൈയെടുക്കാതെ <strong>4 നേർവരകൾ</strong> കൊണ്ട് യോജിപ്പിക്കുക!</p>
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+            <div class="lg:col-span-7 minimal-card rounded-3xl p-5 sm:p-6 flex flex-col items-center">
+              <div class="w-full flex flex-wrap items-center justify-between gap-2 mb-3 text-xs sm:text-sm">
+                <span class="text-slate-600 font-semibold">Volunteer canvas or watch live Box-Break</span>
+                <div class="flex items-center gap-2">
+                  <span id="puzzle2DotCounter" class="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-bold border border-emerald-200">Dots: 0 / 9</span>
+                  <span id="puzzle2LineCounter" class="px-2.5 py-1 rounded-lg bg-slate-100 text-amber-800 font-bold border border-slate-200">Lines: 0 / 4</span>
+                </div>
+              </div>
+
+              <!-- 540x340 Exact Box-Break Geometry Board (75px square grid) -->
+              <svg id="svgPuzzle2" viewBox="0 0 540 340" class="w-full h-64 sm:h-80 bg-slate-50 rounded-2xl border-2 border-slate-200 cursor-crosshair touch-none shadow-inner">
+                <!-- Red Dashed Imaginary Box framing the 9 dots -->
+                <rect id="p2ImaginaryBox" x="122" y="47" width="186" height="186" rx="10" fill="none" stroke="#ef4444" stroke-width="2" stroke-dasharray="7,6" opacity="0.6" />
+                <text x="215" y="39" text-anchor="middle" fill="#ef4444" font-size="11" font-weight="800" opacity="0.85">IMAGINARY BOX</text>
+
+                <!-- 9 Dots (exact 75px grid: x = 140, 215, 290 | y = 65, 140, 215) -->
+                <g id="p2DotsGroup">
+                  <!-- Row 1 -->
+                  <circle id="p2-dot-1" cx="140" cy="65" r="12" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <circle id="p2-dot-2" cx="215" cy="65" r="12" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <circle id="p2-dot-3" cx="290" cy="65" r="12" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <!-- Row 2 -->
+                  <circle id="p2-dot-4" cx="140" cy="140" r="12" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <circle id="p2-dot-5" cx="215" cy="140" r="12" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <circle id="p2-dot-6" cx="290" cy="140" r="12" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <!-- Row 3 -->
+                  <circle id="p2-dot-7" cx="140" cy="215" r="12" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <circle id="p2-dot-8" cx="215" cy="215" r="12" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                  <circle id="p2-dot-9" cx="290" cy="215" r="12" fill="#0f172a" stroke="#334155" stroke-width="2.5" />
+                </g>
+
+                <!-- User drawn lines -->
+                <g id="p2UserLines"></g>
+
+                <!-- Animated 4-Line Continuous Box-Break Solution -->
+                <g id="p2SolutionLines">
+                  <line id="p2-sol-1" x1="140" y1="65" x2="140" y2="65" stroke="#2563eb" stroke-width="4.5" stroke-linecap="round" class="hidden" />
+                  <line id="p2-sol-2" x1="140" y1="290" x2="140" y2="290" stroke="#d97706" stroke-width="4.5" stroke-linecap="round" class="hidden" />
+                  <line id="p2-sol-3" x1="365" y1="65" x2="365" y2="65" stroke="#059669" stroke-width="4.5" stroke-linecap="round" class="hidden" />
+                  <line id="p2-sol-4" x1="140" y1="65" x2="140" y2="65" stroke="#7c3aed" stroke-width="4.5" stroke-linecap="round" class="hidden" />
+                </g>
+
+                <!-- Box-Break Overshoot Badges (appear when pen breaks outside the red box) -->
+                <g id="p2Overshoot1Badge" class="hidden">
+                  <circle cx="140" cy="290" r="6" fill="#2563eb" stroke="#ffffff" stroke-width="2" />
+                  <rect x="152" y="278" width="114" height="23" rx="6" fill="#1e293b" />
+                  <text x="209" y="293" text-anchor="middle" fill="#ffffff" font-size="10.5" font-weight="800">Outside Box 1 ↗</text>
+                </g>
+                <g id="p2Overshoot2Badge" class="hidden">
+                  <circle cx="365" cy="65" r="6" fill="#d97706" stroke="#ffffff" stroke-width="2" />
+                  <rect x="377" y="53" width="116" height="23" rx="6" fill="#1e293b" />
+                  <text x="435" y="68" text-anchor="middle" fill="#ffffff" font-size="10.5" font-weight="800">⬅ Outside Box 2</text>
+                </g>
+
+                <!-- Live Animated Pen Tip -->
+                <g id="p2PenTip" class="hidden" transform="translate(140, 65)">
+                  <circle cx="0" cy="0" r="12" fill="#2563eb" class="pen-halo" />
+                  <circle cx="0" cy="0" r="5.5" fill="#ffffff" stroke="#0f172a" stroke-width="2.5" />
+                </g>
+              </svg>
+
+              <div class="flex flex-wrap items-center justify-center gap-3 mt-4">
+                <button onclick="resetPuzzle2()" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs sm:text-sm font-bold border border-slate-300 transition">↺ Clear Board</button>
+                <button id="revealP2Btn" onclick="revealPuzzle2()" class="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs sm:text-sm font-black shadow transition">🚀 Reveal Box-Break Solution</button>
+              </div>
+            </div>
+            <div class="lg:col-span-5 minimal-card rounded-3xl p-6 space-y-4">
+              <h3 class="text-xl font-bold text-slate-900">എന്തുകൊണ്ടാണ് ഡോട്ട‍ുകള്‍ ബാക്കിയാകുന്നത് ?</h3>
+              <p class="font-ml text-slate-700 text-base leading-relaxed">ഈ 9 ഡോട്ടുകൾക്ക് ചുറ്റും ഒരു <span class="text-rose-600 font-bold">അദൃശ്യ ചതുരക്കൂട് </span> ഉണ്ടെന്ന് നമ്മുടെ തലച്ചോർ സ്വയം സങ്കൽപ്പിക്കുന്നു.</p>
+              <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 font-ml text-slate-700 text-base">ചതുരത്തിന് <strong>പുറത്തേക്ക് വരകൾ നീട്ടി</strong> വരച്ചാൽ മാത്രമേ 9 ഡോട്ടുകളും ബന്ധിപ്പിക്കാൻ കഴിയൂ!</div>
+              <div id="p2SuccessBanner" class="hidden p-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 font-bold text-base">🎯 &#34;Think Outside the Box&#34; എന്ന പ്രയോഗം ജനിച്ചത് തന്നെ ഈ പസിലിൽ നിന്നാണ്!</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 6 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-6" data-segment="Segment 3 • The 6-Inch Box & Welcome">
+          <div class="mb-3"><span class="px-3 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold uppercase">The Master Bridge • Think Outside the 6-Inch Box</span></div>
+          <h2 class="text-4xl sm:text-6xl font-black text-slate-900 mb-6"><span class="text-blue-600">A 6-inch square box </span> in our pocket! 📱</h2>
+          <div class="minimal-card rounded-3xl p-6 sm:p-10 mb-6">
+            <p class="text-xl sm:text-2xl font-bold text-indigo-700 italic mb-4">&#34;Look around. You are not alone, and you are not broken. We have all been handed the most powerful psychological machine in human history without an instruction manual.&#34;</p>
+            <p class="font-ml text-lg sm:text-2xl text-slate-700 leading-relaxed">നമ്മുടെ ചിന്തകളും സൗഹൃദങ്ങളും സ്വപ്നങ്ങളും സമയവും വെറുമൊരു <strong>6-ഇഞ്ച് സ്ക്രീൻ ബോക്സിനുള്ളിൽ</strong> ഒതുങ്ങിപ്പോയിരിക്കുന്നു. Comfort Zone-ന് പുറത്തേക്ക് കടന്നാൽ മാത്രമേ യഥാർത്ഥ വളർച്ച സാധ്യമാകൂ!</p>
+          </div>
+          <div class="rounded-3xl p-8 bg-blue-600 text-white text-center shadow-lg">
+            <div class="text-3xl sm:text-5xl font-black tracking-wide mb-2">LET US MOVE FROM SCREEN TO SEEN!</div>
+            <div class="font-ml text-xl sm:text-2xl font-bold text-blue-100"></div>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 7 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-7" data-segment="Segment 4 • Stand-Up Reality Poll (08:00–12:00)">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <span class="px-3 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold uppercase">Segment 04 • Stand-Up Reality Poll</span>
+            <span class="px-3 py-1 rounded-lg bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200">🛡️ 100% No-Shaming Zone</span>
+          </div>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-2"><span class="text-blue-600">If the answer is 'YES', You may sit.</span></h2>
+          <p class="font-ml text-base text-slate-600 mb-4">സത്യസന്ധമായിരിക്കണം! താഴെ പറയുന്ന ശീലങ്ങൾ <strong>ഇല്ലാത്തവർ</strong> മാത്രം സീറ്റിൽ ഇരിക്കുക:</p>
+          <div class="grid grid-cols-1 gap-3">
+            <div class="minimal-card rounded-2xl p-4 flex items-start gap-4 border-l-4 border-l-blue-600">
+              <span class="px-3 py-1 rounded-lg bg-blue-50 text-blue-700 font-black text-sm">01</span>
+              <div class="font-ml"><div class="font-bold text-slate-900 text-lg"><span class="text-emerald-600 font-sans font-bold">The 2 Min Break Trap</span></div><div class="text-slate-700 text-base">&#34;10 മിനിറ്റ് പഠിച്ചിട്ട് അല്ലെങ്കിൽ ജോലി ചെയ്തിട്ട് &#39;2 മിനിറ്റ് റെസ്റ്റ് എടുക്കാം&#39; എന്ന് പറഞ്ഞ് ഫോൺ എടുക്കുകയും, ആ 2 മിനിറ്റ് 2 മണിക്കൂറായി മാറുകയും ചെയ്യാത്തവർ ഇരിക്കൂ!&#34;</div></div>                                 
+            </div>
+            <div class="minimal-card rounded-2xl p-4 flex items-start gap-4 border-l-4 border-l-indigo-600">
+              <span class="px-3 py-1 rounded-lg bg-indigo-50 text-indigo-700 font-black text-sm">02</span>
+              <div class="font-ml"><div class="font-bold text-slate-900 text-lg"><span class="text-blue-600 font-sans font-bold">The Classic Excuse</span></div><div class="text-slate-700 text-base">&#34;വീട്ടിൽ കുറേ നേരമായി ഫോണിൽ കുത്തിയിരിക്കുമ്പോൾ, 'ഇനി മതി, ഫോൺ താഴെ വയ്ക്ക്' എന്ന് വീട്ടുകാർ പറയുമ്പോൾ, 'ഞാനിപ്പോൾ എടുത്തതേയുള്ളൂ!' എന്ന് ജീവിതത്തിൽ ഒരിക്കൽ പോലും കള്ളം പറയാത്തവർ ഇരിക്കൂ!&#34;</div></div>              
+            </div>
+            <div class="minimal-card rounded-2xl p-4 flex items-start gap-4 border-l-4 border-l-amber-500">
+              <span class="px-3 py-1 rounded-lg bg-amber-50 text-amber-700 font-black text-sm">03</span>
+              <div class="font-ml"><div class="font-bold text-slate-900 text-lg"><span class="text-rose-600 font-sans font-bold">Ninja Reflex</span></div><div class="text-slate-700 text-base">&#34;പഠിക്കാനിരുന്നിട്ട് രഹസ്യമായി ഫോൺ നോക്കുമ്പോൾ അമ്മ/അച്ഛൻ വരുന്ന ശബ്ദം കേട്ട് മിന്നൽ വേഗത്തിൽ ഫോൺ ഒളിപ്പിക്കാത്തവർ ഇരിക്കൂ!&#34;</div></div>         
+            </div>
+            <div class="minimal-card rounded-2xl p-4 flex items-start gap-4 border-l-4 border-l-rose-500">
+              <span class="px-3 py-1 rounded-lg bg-rose-50 text-rose-700 font-black text-sm">04</span>
+              <div class="font-ml"><div class="font-bold text-slate-900 text-lg"><span class="text-amber-600 font-sans font-bold">Midnight Reels Trap</span></div><div class="text-slate-700 text-base">&#34;രാത്രി 10 മണിക്ക് &#39;വെറും 5 മിനിറ്റ് റീൽസ് കണ്ടിട്ട് ഉറങ്ങാം&#39; എന്ന് വിചാരിച്ച് സമയം 1 മണിയോ 2 മണിയോ ആകാത്തവർ ഇരിക്കൂ!&#34;</div></div>
+            </div>
+            <div class="minimal-card rounded-2xl p-4 flex items-start gap-4 border-l-4 border-l-emerald-600">
+              <span class="px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-black text-sm">05</span>
+              <div class="font-ml"><div class="font-bold text-slate-900 text-lg"><span class="text-indigo-600 font-sans font-bold">No-Phone, No-Peace</span></div><div class="text-slate-700 text-base">&#34;ഫോൺ കയ്യിലെടുക്കാതെ ബാത്ത്റൂമിൽ പോയാൽ &#39;എന്തോ മന:സമാധാനം &#39; തോന്നാത്തവർ ഇരിക്കൂ!&#34;</div></div>              
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 8 ==================== -->
+        <section class="slide-container flex-col items-center justify-center text-center min-h-[74vh]" data-slide-id="builtin-8" data-segment="Segment 4 • Reality Poll Verdict">
+          <div class="w-20 h-20 rounded-2xl bg-blue-50 border-2 border-blue-200 flex items-center justify-center text-4xl mb-6 shadow-sm">🎯</div>
+          <h2 class="text-4xl sm:text-6xl font-black text-slate-900 max-w-4xl leading-tight mb-6">It&#39;s Not Your Fault.<br /><span class="text-blue-600">It&#39;s a Designed System!</span></h2>
+          <div class="minimal-card rounded-3xl p-6 sm:p-10 max-w-3xl">
+            <p class="font-ml text-xl sm:text-2xl text-slate-700 leading-relaxed mb-4">You are not weak.<br>This isn't a lack of will power.<br>Nobody in this room is broken.<br>We all are competing against thousands of top software engineers whose sole job is to keep our eyes on the 6-Inch Box.<br>We all are fighting a multi-billion dollar casino built inside our pocket.<br> </p>
+            <p class="font-ml text-lg sm:text-2xl text-indigo-700 font-black">നിങ്ങളുടെ വിരലുകൾക്കെതിരെ പ്രവർത്തിക്കുന്നത് ലോകത്തിലെ ഏറ്റവും ശക്തമായ Behavioral Engineering System ആണ്!</p>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 9 ==================== -->
+        <section class="slide-container flex-col items-center justify-center text-center min-h-[74vh]" data-slide-id="builtin-9" data-segment="Segment 4 • Bat & Ball Reaction Trap">
+          <span class="px-3 py-1 rounded-lg bg-amber-50 border border-amber-300 text-amber-800 text-xs font-bold uppercase mb-4">⚡ Instant Reflex Test — Do Not Calculate Slowly!</span>
+          <h2 class="text-4xl sm:text-6xl font-black text-slate-900 mb-6">The Bat &amp; Ball <span class="text-amber-600">Reaction Trap</span> 🏏</h2>
+          <div class="minimal-card rounded-3xl p-6 sm:p-10 max-w-3xl w-full">
+            <p class="font-ml text-xl sm:text-3xl font-bold text-slate-900 leading-relaxed mb-6">
+              ഒരു ബാറ്റിനും ബോളിനും കൂടി ആകെ വില <span class="text-blue-600 font-black">₹110</span>.<br />
+              ബാറ്റിന് ബോളിനേക്കാൾ <span class="text-amber-600 font-black">₹100</span> കൂടുതൽ വിലയുണ്ട്.<br />
+              എങ്കിൽ <span class="text-emerald-700 underline font-bold">ബോളിന്റെ മാത്രം വില</span> എത്ര?
+            </p>
+            <button id="batBallRevealBtn" onclick="revealBatBall()" class="px-8 py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black text-base sm:text-lg shadow-md transition">🔍 Reveal Real Answer</button>
+            <div id="batBallAnswerBox" class="hidden mt-6 pt-6 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-4 text-left">
+              <div class="p-5 rounded-2xl bg-rose-50 border border-rose-200">
+                <div class="text-xs font-bold uppercase text-rose-700 mb-1">❌ 95% ആളുകളുടെ പെട്ടെന്നുള്ള ഉത്തരം</div>
+                <div class="text-3xl font-black text-rose-800">ബോൾ = ₹10</div>
+                <p class="font-ml text-sm text-rose-900 mt-2">ബോൾ ₹10 എങ്കിൽ ബാറ്റ് ₹110 ആകും. ആകെ ₹120! (തെറ്റ്)</p>
+              </div>
+              <div class="p-5 rounded-2xl bg-emerald-50 border border-emerald-200">
+                <div class="text-xs font-bold uppercase text-emerald-700 mb-1">✅ ശരിയായ ഗണിത ഉത്തരം</div>
+                <div class="text-3xl font-black text-emerald-800">ബോൾ = ₹5</div>
+                <p class="font-ml text-sm text-emerald-900 mt-2">ബോൾ ₹5 + ബാറ്റ് ₹105 (₹100 കൂടുതൽ) = ആകെ ₹110!</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 10 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-10" data-segment="Segment 4 • Daniel Kahneman: System 1 vs System 2">
+          <div class="mb-3"><span class="px-3 py-1 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold uppercase">Nobel Laureate Daniel Kahneman • Thinking, Fast and Slow</span></div>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-6">The brain's 2 engines: <span class="text-blue-600">System 1 vs. System 2</span></h2>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="minimal-card rounded-3xl p-6 sm:p-8 border-t-4 border-t-rose-500">
+              <div class="flex items-center justify-between mb-4"><span class="text-2xl sm:text-3xl font-black text-rose-600">SYSTEM 1</span><span class="px-3 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-bold">Fast • Autopilot</span></div>
+              <ul class="space-y-3 font-ml text-slate-700 text-base sm:text-lg">
+                <li>⚡ ചിന്തിക്കാതെ അതിവേഗം പ്രതികരിക്കുന്ന ഭാഗം.</li>
+                <li>⚡ ബാറ്റ്-ബോൾ ചോദ്യത്തിന് &#39;₹10&#39; എന്ന് വിളിച്ചു പറഞ്ഞത് System 1 ആണ്.</li>
+                <li>⚡ ചുവന്ന നോട്ടിഫിക്കേഷൻ കാണുമ്പോൾ അറിയാതെ വിരൽ നീളുന്നത് ഇതുകൊണ്ടാണ്.</li>
+              </ul>
+            </div>
+            <div class="minimal-card rounded-3xl p-6 sm:p-8 border-t-4 border-t-emerald-600">
+              <div class="flex items-center justify-between mb-4"><span class="text-2xl sm:text-3xl font-black text-emerald-700">SYSTEM 2</span><span class="px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 text-xs font-bold">Slow • Analytical</span></div>
+              <ul class="space-y-3 font-ml text-slate-700 text-base sm:text-lg">
+                <li>🧠 ആഴത്തിൽ ചിന്തിക്കാനും കണക്ക് ചെയ്യാനും ഉപയോഗിക്കുന്ന ഭാഗം.</li>
+                <li>🧠 ഫിസിക്സ് തിയറികളും ബോർഡ് എക്സാം ചോദ്യങ്ങളും മനസ്സിലാക്കാൻ ഇത് വേണം.</li>
+                <li>🧠 ഇതിന് ഏകാഗ്രതയും സമയവും മാനസിക ഊർജ്ജവും ആവശ്യമാണ്.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 11 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-11" data-segment="Segment 4 • The Stroop Effect Live Experiment">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <span class="px-3 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold uppercase">Live Brain Conflict Experiment</span>
+            <button onclick="shuffleStroop()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-bold shadow transition">🔀 Shuffle Colors</button>
+          </div>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-2">The Stroop Effect: <span class="text-amber-600">Say the <strong>INK COLOR</strong> out loud — NOT the written word!</span></h2>          
+          <div id="stroopGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 minimal-card p-6 rounded-3xl"></div>
+        </section>
+
+        <!-- ==================== SLIDE 12 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-12" data-segment="Segment 4 • Cognitive Hijacking & Exam Impact">
+          <span class="px-3 py-1 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold uppercase w-fit mb-3">Neuroscience of App Design</span>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-6">Cognitive Hijacking: <span class="text-rose-600">The Accident in the Exam Hall!</span></h2>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="minimal-card rounded-3xl p-6 sm:p-8 border-l-4 border-l-rose-500">
+              <h3 class="text-2xl font-bold text-rose-700 mb-3">എന്തുകൊണ്ടാണ് നോട്ടിഫിക്കേഷൻ ഡോട്ട് ചുവപ്പായത്?</h3>
+              <p class="font-ml text-slate-700 text-base sm:text-xl leading-relaxed">അപകടത്തെ സൂചിപ്പിക്കുന്ന <strong>ചുവപ്പ് നിറം </strong> മനുഷ്യന്റെ പ്രാകൃതമായ <strong>System 1-നെ</strong> ഉടൻ ഉണർത്തുന്നു. ചിന്തിക്കുന്ന System 2-നെ മറികടന്ന് നിങ്ങളുടെ വിരൽ ആപ്പിലേക്ക് നീളുന്നു.</p>
+            </div>
+            <div class="minimal-card rounded-3xl p-6 sm:p-8 border-l-4 border-l-amber-500">
+              <h3 class="text-2xl font-bold text-amber-700 mb-3">പരീക്ഷാ പേപ്പറിലെ തെറ്റുകൾക്ക് പിന്നിൽ!</h3>
+              <p class="font-ml text-slate-700 text-base sm:text-xl leading-relaxed">ദിവസം മുഴുവൻ System 1 മാത്രം ഉപയോഗിച്ച് റീൽസ് സ്ക്രോൾ ചെയ്യുന്ന വിദ്യാർത്ഥി പരീക്ഷാ ഹാളിൽ എത്തുമ്പോൾ <strong>System 2 മരവിച്ചിരിക്കും</strong>. ചോദ്യം മുഴുവൻ വായിക്കാതെ തെറ്റായ ഉത്തരങ്ങൾ എഴുതുന്നത് ഇതുകൊണ്ടാണ്!</p>
+            </div>
+          </div>
+        </section> 
+
+        <!-- ==================== SLIDE 13 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-13" data-segment="Segment 5 • Silicon Valley Secrets (12:00–20:00)">
+          <div class="mb-2"><span class="px-3 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold uppercase">Segment 05 • The Tech Irony</span></div>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-4">5 Shocking Truths<span class="text-blue-600"> About Silicon Valley!</span> 🤫</h2>
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div class="minimal-card rounded-2xl p-5 border-t-2 border-t-blue-600"><div class="text-xs font-bold text-blue-600 uppercase mb-1">1. Steve Jobs (Apple)</div><p class="font-ml text-sm sm:text-base text-slate-700">ലോകത്തിന് iPad വിറ്റ സ്റ്റീവ് ജോബ്സ് സ്വന്തം മക്കൾക്ക് രാത്രിയിലും വാരാന്ത്യങ്ങളിലും iPad ഉപയോഗിക്കാൻ അനുവാദം നൽകിയിരുന്നില്ല!</p></div>
+            <div class="minimal-card rounded-2xl p-5 border-t-2 border-t-indigo-600"><div class="text-xs font-bold text-indigo-600 uppercase mb-1">2. Bill Gates (Microsoft)</div><p class="font-ml text-sm sm:text-base text-slate-700">ബിൽ ഗേറ്റ്സ് സ്വന്തം മക്കൾക്ക് <strong>14 വയസ്സ് തികയുന്നതുവരെ</strong> സ്മാർട്ട്‌ഫോൺ നൽകിയിരുന്നില്ല; ഭക്ഷണമേശയിൽ ഫോൺ നിരോധിച്ചിരുന്നു.</p></div>
+            <div class="minimal-card rounded-2xl p-5 border-t-2 border-t-amber-500"><div class="text-xs font-bold text-amber-700 uppercase mb-1">3. Justin Rosenstein ('Like' Inventor)</div><p class="font-ml text-sm sm:text-base text-slate-700">&#39;Like&#39; ബട്ടൺ ഉണ്ടാക്കിയ എഞ്ചിനീയർ സ്വന്തം ഫോണിൽ നിന്ന് സോഷ്യൽ മീഡിയ ഡിലീറ്റ് ചെയ്ത് ആപ്പ് ഡൗൺലോഡ് ലോക്ക് ചെയ്തു വെച്ചു!</p></div>
+            <div class="minimal-card rounded-2xl p-5 border-t-2 border-t-rose-500"><div class="text-xs font-bold text-rose-600 uppercase mb-1">4. Susan Wojcicki (Ex-YouTube CEO)</div><p class="font-ml text-sm sm:text-base text-slate-700">യൂട്യൂബ് സി.ഇ.ഒ സ്വന്തം മക്കളുടെ ഫോണിൽ നിന്ന് സാധാരണ YouTube ആപ്പ് ഒഴിവാക്കി കർശന സമയനിയന്ത്രണം ഏർപ്പെടുത്തി.</p></div>
+            <div class="minimal-card rounded-2xl p-5 border-t-2 border-t-emerald-600 md:col-span-2 lg:col-span-2"><div class="text-xs font-bold text-emerald-700 uppercase mb-1">5. Waldorf Schools of Silicon Valley (Zero-Screen Classrooms)</div><p class="font-ml text-sm sm:text-base text-slate-700">Google, Meta എഞ്ചിനീയർമാരുടെ മക്കൾ പഠിക്കുന്ന വാൾഡോർഫ് സ്കൂളുകളിൽ ക്ലാസ് മുറികളിൽ കമ്പ്യൂട്ടറുകളും ഫോണുകളും പൂർണ്ണമായി നിരോധിച്ചിരിക്കുന്നു! <strong>ഈ വല നെയ്തവർ സ്വന്തം മക്കളെ അതിൽ കുടുങ്ങാൻ വിടുന്നില്ല;</strong></p></div>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 14 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-14" data-segment="Segment 5 • The Attention Economy">
+          <span class="px-3 py-1 rounded-lg bg-amber-50 border border-amber-300 text-amber-800 text-xs font-bold uppercase w-fit mb-3">The Golden Law of Free Apps</span>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-6 leading-tight">&#34;If you are not paying for a product,<br /><span class="text-blue-600">you are the product.&#34;</span></h2>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="minimal-card rounded-3xl p-6 sm:p-8 border-l-4 border-l-blue-600">
+              <h3 class="text-2xl font-bold text-slate-900 mb-4">എങ്ങനെയാണ് സൗജന്യ ആപ്പുകൾ കോടികൾ ഉണ്ടാക്കുന്നത്?</h3>
+              <ul class="space-y-3 font-ml text-slate-700 text-base sm:text-lg">
+                <li>• <strong>Raw Material:</strong> നമ്മുടെ സമയവും ഏകാഗ്രതയുമാണ് സോഷ്യൽ മീഡിയയുടെ മൂലധനം.</li>
+                <li>• <strong>Data Harvesting:</strong> നിങ്ങൾ എന്ത് കാണുന്നു, എത്ര സമയം ചെലവഴിക്കുന്നു എന്ന ഡാറ്റ ശേഖരിക്കുന്നു.</li>
+                <li>• <strong>Targeted Ads:</strong> ശേഖരിച്ച ഡാറ്റ ഉപയോഗിച്ച് കോർപ്പറേറ്റ് കമ്പനികൾക്ക് നമ്മുടെ ശ്രദ്ധ വിൽക്കുന്നു.</li>
+              </ul>
+            </div>
+            <div class="minimal-card rounded-3xl p-6 sm:p-8 border-l-4 border-l-amber-500 flex flex-col justify-between">
+              <div>
+                <h3 class="text-2xl font-bold text-amber-800 mb-3">സ്ക്രീനിന്റെ രണ്ട് വശങ്ങൾ:</h3>
+                <div class="space-y-2.5 font-ml text-sm sm:text-base">
+                  <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">💰 <strong>ടെക് കമ്പനികൾക്ക്:</strong> കോടികളുടെ ലാഭവും ഉയർന്ന ഷെയർ വാല്യുവും.</div>
+                  <div class="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-900">⏳ <strong>നിങ്ങൾക്ക്:</strong> പാഴായ മണിക്കൂറുകളും, നഷ്ടപ്പെട്ട പരീക്ഷാ ശ്രദ്ധയും!</div>
+                </div>
+              </div>
+              <div class="mt-4 p-4 rounded-xl bg-blue-50 border border-blue-200 text-center font-bold text-blue-900 text-base">സ്ക്രീനിലെ കാഴ്ചക്കാരനാണോ അതോ സ്വന്തം ഭാവിയുടെ ഉടമയാകണോ നമ്മള്‍ ?</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 15 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-15" data-segment="Segment 5 • The Pocket Casino & Dopamine Loop">
+          <div class="mb-3"><span class="px-3 py-1 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold uppercase">Behavioral Engineering • Slot Machine Design</span></div>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-6"><span class="text-indigo-600">The Pocket Casino</span> 🎰</h2>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div class="minimal-card rounded-3xl p-6 border-t-4 border-t-blue-600"><div class="text-4xl mb-3">♾️</div><h3 class="text-xl font-bold text-slate-900 mb-2">1. Infinite Scroll</h3><p class="font-ml text-sm sm:text-base text-slate-700 leading-relaxed">2006-ൽ Infinite Scroll കണ്ടുപിടിച്ച <strong>അസാ റാസ്കിൻ</strong>, മനുഷ്യരാശിയുടെ ലക്ഷക്കണക്കിന് വർഷത്തെ സമയം മോഷ്ടിച്ചതിന് പിന്നീട് <strong>BBC</strong>-യിലൂടെ പരസ്യമായി മാപ്പ് പറഞ്ഞു!</p></div>
+            <div class="minimal-card rounded-3xl p-6 border-t-4 border-t-amber-500"><div class="text-4xl mb-3">🍲</div><h3 class="text-xl font-bold text-slate-900 mb-2">2. 73% Soup Bowl Trap</h3><p class="font-ml text-sm sm:text-base text-slate-700 leading-relaxed">കോർണൽ യൂണിവേഴ്സിറ്റി പഠനം: അടിഭാഗത്ത് നിന്ന് സ്വയം നിറയുന്ന ബൗളിൽ നിന്ന് ആളുകൾ <strong>73% കൂടുതൽ സൂപ്പ്</strong> കുടിച്ചു! റീൽസിൽ 'Stopping Cue' ഇല്ലാത്തതും ഇതേ തന്ത്രമാണ്.</p></div>
+            <div class="minimal-card rounded-3xl p-6 border-t-4 border-t-rose-500"><div class="text-4xl mb-3">👆</div><h3 class="text-xl font-bold text-slate-900 mb-2">3. 2,617 Daily Touches</h3><p class="font-ml text-sm sm:text-base text-slate-700 leading-relaxed">ലാസ് വെഗാസ് സ്ലോട്ട് മെഷീനുകളുടെ മാതൃകയിലുള്ള Pull-to-Refresh തലച്ചോറിൽ ഡോപമൈൻ പമ്പ് ചെയ്യുന്നു. ഒരു കൗമാരക്കാരൻ ശരാശരി <strong>2,617 തവണ</strong> ദിവസവും സ്ക്രീനിൽ തൊടുന്നു!</p></div>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 16 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-16" data-segment="Segment 5 • Multitasking Trap & Attention Residue (23m 15s)">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <span class="px-3 py-1 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold uppercase">Prof. Gloria Mark • UC Irvine Research</span>
+            <span class="text-xs text-slate-600 font-semibold">Live Paper-Pen Experiment + Focus Recovery Cost</span>
+          </div>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-5">The Myth of Multitasking &amp; <span class="text-rose-600">23m 15s Attention Residue</span> ⏱️</h2>
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div class="lg:col-span-6 minimal-card rounded-3xl p-6 border border-indigo-200 flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-xs font-bold uppercase text-indigo-700">✍️ Live Paper-Pen Experiment</span>
+                  <span id="stopwatchDisplay" class="font-mono text-3xl font-black text-blue-600">00.0s</span>
+                </div>
+                <div class="space-y-2 font-ml text-sm text-slate-700 mb-4">
+                  <div class="p-3 rounded-xl bg-slate-50 border border-slate-200"><strong>Round 1 (Sequential):</strong> <code>I AM A TOPPER</code> എഴുതിയ ശേഷം താഴെ <code>1 - 10</code> എഴുതുക.</div>
+                  <div class="p-3 rounded-xl bg-slate-50 border border-slate-200"><strong>Round 2 (Multitasking):</strong> മാറിമാറി എഴുതുക: <code>I 1 A 2 M 3 A 4 T 5...</code></div>
+                </div>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <button id="swStartBtn" onclick="toggleStopwatch()" class="flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm transition">▶ Start Timer</button>
+                <button onclick="recordRound(1)" class="py-3 px-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-blue-700 border border-slate-300">Save R1 (<span id="r1Time">--</span>)</button>
+                <button onclick="recordRound(2)" class="py-3 px-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-amber-700 border border-slate-300">Save R2 (<span id="r2Time">--</span>)</button>
+                <button onclick="resetStopwatch()" class="py-3 px-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 border border-slate-300">↺</button>
+              </div>
+            </div>
+            <div class="lg:col-span-6 space-y-4 flex flex-col justify-between">
+              <div class="minimal-card rounded-3xl p-6 border-l-4 border-l-rose-500">
+                <div class="flex items-baseline justify-between mb-2"><h3 class="text-xl font-bold text-rose-700">Attention Residue Cost</h3><span class="text-3xl font-black text-rose-600">23m 15s</span></div>
+                <p class="font-ml text-base text-slate-700">പഠിക്കുമ്പോൾ ഒരൊറ്റ നോട്ടിഫിക്കേഷൻ നോക്കിയാൽ പഴയ ഏകാഗ്രത തിരികെ ലഭിക്കാൻ <strong>23 മിനിറ്റും 15 സെക്കൻഡും</strong> വേണം!</p>
+              </div>
+              <div class="minimal-card rounded-3xl p-6 border-l-4 border-l-blue-600">
+                <h3 class="text-xl font-bold text-blue-700 mb-2">Death of Boredom</h3>
+                <p class="font-ml text-base text-slate-700">പണ്ട് ബോറടിച്ചിരിക്കുമ്പോഴാണ് വലിയ ആശയങ്ങളും കവിതകളും ജനിച്ചിരുന്നത്. ഇന്ന് 5 സെക്കൻഡ് ബോറടിക്കുമ്പോഴേക്കും റീൽസ് തുറന്ന് നമ്മൾ ക്രിയേറ്റിവിറ്റിയെ കൊല്ലുന്നു.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 17 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-17" data-segment="Segment 5 • Global Data & India's TikTok Ban">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <span class="px-3 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold uppercase">Global Research (US &amp; OECD) + National Security</span>
+            <span class="text-xs text-slate-600 font-semibold">*Global stats reflect US &amp; 38 OECD countries</span>
+          </div>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-4">Shocking statistics <span class="text-amber-600"> & the TikTok ban in India</span> 📊</h2>
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            <div class="lg:col-span-7 grid grid-cols-2 gap-3.5">
+              <div class="minimal-card rounded-2xl p-4"><div class="text-3xl font-black text-blue-600">96% / 73%</div><p class="font-ml text-xs sm:text-sm text-slate-700 mt-1">കൗമാരക്കാരിൽ 96% ദിവസവും ഇന്റർനെറ്റും 73% YouTube-ഉം ഉപയോഗിക്കുന്നു <em>(Pew, 2024)</em>.</p></div>
+              <div class="minimal-card rounded-2xl p-4"><div class="text-3xl font-black text-rose-600">50.4%</div><p class="font-ml text-xs sm:text-sm text-slate-700 mt-1">ദിവസവും 4+ മണിക്കൂർ സ്ക്രീൻ ഉപയോഗിക്കുന്നവരിൽ ഉത്കണ്ഠയും വിഷാദവും കൂടുതൽ <em>(CDC, 2024)</em>.</p></div>
+              <div class="minimal-card rounded-2xl p-4"><div class="text-3xl font-black text-amber-600">35 Hrs/Wk</div><p class="font-ml text-xs sm:text-sm text-slate-700 mt-1"> 15 വയസ്സുകാരുടെ ശരാശരി സോഷ്യൽ മീഡിയ ഉപയോഗം <em>(OECD, 2025)</em>.</p></div>
+              <div class="minimal-card rounded-2xl p-4"><div class="text-3xl font-black text-indigo-600">8h 15m / 45%</div><p class="font-ml text-xs sm:text-sm text-slate-700 mt-1">വിനോദ സ്ക്രീൻ സമയം 8h 15m; 45% പേർ അമിത ഉപയോഗം സമ്മതിക്കുന്നു.</p></div>
+            </div>
+            <div class="lg:col-span-5 minimal-card rounded-3xl p-5 border-l-4 border-l-amber-500 flex flex-col justify-between bg-amber-50/40">
+              <div>
+                <div class="inline-block px-2.5 py-1 rounded bg-amber-100 text-amber-900 text-xs font-bold mb-2">🇮🇳 2020 ജൂൺ 29 • ചരിത്രപരമായ തീരുമാനം</div>
+                <h3 class="text-lg sm:text-xl font-bold text-slate-900 mb-2">ഇന്ത്യയിൽ TikTok ഉൾപ്പെടെ 59 ആപ്പുകൾ നിരോധിച്ചത് എന്തുകൊണ്ട്?</h3>
+                <ul class="space-y-2 font-ml text-xs sm:text-sm text-slate-700">
+                  <li>🛡️ <strong>ദേശീയ സുരക്ഷ:</strong> രാജ്യത്തിന്റെ സുരക്ഷയ്ക്കും പരമാധികാരത്തിനുമുള്ള ഭീഷണി.</li>
+                  <li>🔐 <strong>ഡാറ്റാ സ്വകാര്യത:</strong> പൗരന്മാരുടെ സ്വകാര്യ വിവരങ്ങളുടെ സുരക്ഷ.</li>
+                  <li>🌐 <strong>സൈബർ സുരക്ഷ:</strong> വിദേശ സെർവറുകളിലേക്ക് വിവരങ്ങൾ ചോരാനുള്ള സാധ്യത.</li>
+                </ul>
+              </div>
+              <div class="mt-3 pt-2 border-t border-amber-200 text-[11px] text-slate-600">OECD (38 അംഗരാജ്യങ്ങൾ, 1961, പാരീസ്) — ഇന്ത്യ Key Partner രാജ്യമാണ്.</div>
+            </div>
+          </div><br>
+          <a href="https://en.wikipedia.org/wiki/OECD" target="_blank" rel="noopener noreferrer"
+                class="text-blue-600 underline font-bold hover:text-blue-800">
+                OECD COUNTRIES (1961) </a>
+        </section>
+
+        <!-- ==================== SLIDE 18 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-18" data-segment="Segment 6 • Physical Health Impact (20:00–24:00)">
+          <span class="px-3 py-1 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold uppercase w-fit mb-3">Segment 06 • Body Warning Signals</span>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-6">3 warnings <span class="text-rose-600">from Our body !</span> 🩺</h2>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="minimal-card rounded-3xl p-6 border-t-4 border-t-rose-500"><div class="text-4xl mb-3">📱</div><h3 class="text-xl font-bold text-slate-900 mb-2">1. Text Neck Syndrome</h3><div class="p-3 rounded-xl bg-rose-50 border border-rose-200 text-center my-3"><span class="text-slate-700 text-sm">0° = 5 kg</span> ➔ <span class="text-rose-700 font-black text-lg">60° = 27 kg!</span></div><p class="font-ml text-sm sm:text-base text-slate-700">ഒരു <strong>8 വയസ്സുള്ള കുട്ടിയെ</strong> കഴുത്തിൽ ചുമക്കുന്നതിന് തുല്യം! ഫോൺ കണ്ണിന്റെ നിരപ്പിൽ പിടിക്കുക.</p></div>
+            <div class="minimal-card rounded-3xl p-6 border-t-4 border-t-blue-600"><div class="text-4xl mb-3">👁️</div><h3 class="text-xl font-bold text-slate-900 mb-2">2. Digital Eye Strain</h3><div class="p-3 rounded-xl bg-blue-50 border border-blue-200 text-center my-3"><span class="text-blue-700 font-black text-lg">The 20-20-20 Rule</span></div><p class="font-ml text-sm sm:text-base text-slate-700">ഓരോ <strong>20 മിനിറ്റിലും 20 അടി</strong> അകലെയുള്ള വസ്തുവിലേക്ക് <strong>20 സെക്കൻഡ്</strong> നോക്കുക.</p></div>
+            <div class="minimal-card rounded-3xl p-6 border-t-4 border-t-indigo-600"><div class="text-4xl mb-3">🌙</div><h3 class="text-xl font-bold text-slate-900 mb-2">3. Melatonin Block</h3><div class="p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-center my-3"><span class="text-indigo-800 font-black text-base">Blue Light = Memory Loss</span></div><p class="font-ml text-sm sm:text-base text-slate-700">രാത്രിയിലെ നീല വെളിച്ചം ഉറക്ക ഹോർമോണായ <strong>മെലറ്റോണിനെ</strong> തടയുന്നു. പഠിച്ച കാര്യങ്ങൾ ഓർമ്മയിൽ നിൽക്കില്ല!</p></div>
+          </div>
+          <br> <a href="https://en.wikipedia.org/wiki/Melatonin" target="_blank" rel="noopener noreferrer"
+                class="text-blue-600 underline font-bold hover:text-blue-800">
+                Melatonin - A Natural Hormone  </a>
+        </section>
+
+        <!-- ==================== SLIDE 19 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-19" data-segment="Segment 7 • Mental Health Challenges (24:00–28:00)">
+          <span class="px-3 py-1 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold uppercase w-fit mb-3">Segment 07 • Silent Mental Traps</span>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-6">Silent Killers <span class="text-indigo-600">of the Mind !</span> 🧠</h2>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <div class="minimal-card rounded-3xl p-6 border-l-4 border-l-blue-600"><h3 class="text-xl font-bold text-blue-700 mb-2">🪞 1. FOMO &amp; Highlight Reel Trap</h3><p class="font-ml text-base text-slate-700">മറ്റുള്ളവരുടെ ഫിൽട്ടർ ചെയ്ത <strong>1% ഹൈലൈറ്റ് റീൽ</strong> കണ്ട് നമ്മുടെ <strong>100% യഥാർത്ഥ ജീവിതവുമായി</strong> താരതമ്യം ചെയ്യരുത്.</p></div>
+            <div class="minimal-card rounded-3xl p-6 border-l-4 border-l-amber-500"><h3 class="text-xl font-bold text-amber-700 mb-2">⚡ 2. Reels Brain (Brain Rot)</h3><p class="font-ml text-base text-slate-700">15-സെക്കൻഡ് വിഡിയോകൾ കണ്ട് ശീലിച്ച തലച്ചോറിന് ക്ഷമ നഷ്ടപ്പെടുന്നു; പാഠഭാഗം വായിക്കാൻ മടി തോന്നുന്നു.</p></div>
+            <div class="minimal-card rounded-3xl p-6 border-l-4 border-l-rose-500"><h3 class="text-xl font-bold text-rose-700 mb-2">📳 3. Phantom Vibration Syndrome</h3><p class="font-ml text-base text-slate-700">ഒരൊറ്റ മെസ്സേജും വരാതെ പോക്കറ്റിൽ ഫോൺ വിറച്ചതായി തോന്നുന്ന അവസ്ഥ—ഡിജിറ്റൽ ഉത്കണ്ഠയുടെ ലക്ഷണമാണ്.</p></div>
+            <div class="minimal-card rounded-3xl p-6 border-l-4 border-l-emerald-600"><h3 class="text-xl font-bold text-emerald-700 mb-2">❤️ 4. Validation Addiction</h3><p class="font-ml text-base text-slate-700">ലൈക്കുകളുടെ എണ്ണത്തിൽ സ്വന്തം വില അളക്കുന്ന ശീലം. സന്തോഷത്തിന്റെ റിമോട്ട് കൺട്രോൾ അപരിചിതർക്ക് നൽകരുത്!</p></div>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 20 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-20" data-segment="Segment 8 • Cyber Security & 1930 Protocol (28:00–33:00)">
+          <span class="px-3 py-1 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold uppercase w-fit mb-3">Segment 08 • Cyber Defense &amp; Golden Hour</span>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-5">Cybersecurity &amp; <span class="text-rose-600">& Financial Traps!</span> 🛡️</h2>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="minimal-card rounded-2xl p-5 border-t-4 border-t-amber-500"><h3 class="text-lg font-bold text-amber-800 mb-1.5">🎣 1. Phishing &amp; Smishing Traps</h3><p class="font-ml text-sm text-slate-700">Free UC/Diamonds, Blue Tick, Copyright ലിങ്കുകളിൽ ക്ലിക്ക് ചെയ്ത് പാസ്‌വേഡും OTP-യും നൽകരുത്.</p></div>
+            <div class="minimal-card rounded-2xl p-5 border-t-4 border-t-rose-500"><h3 class="text-lg font-bold text-rose-700 mb-1.5">💸 2. Money Mule</h3><p class="font-ml text-sm text-slate-700">Task Scams-ൽ വീഴരുത്. കമ്മീഷനായി ബാങ്ക് അക്കൗണ്ടോ UPI ഐഡിയോ അപരിചിതർക്ക് നൽകുന്നത് ക്രിമിനൽ കുറ്റമാണ്.</p></div>
+            <div class="minimal-card rounded-2xl p-5 border-t-4 border-t-indigo-600"><h3 class="text-lg font-bold text-indigo-700 mb-1.5">📸 3.Deepfakes</h3><p class="font-ml text-sm text-slate-700">&#39;View Once&#39; സുരക്ഷിതമല്ല; GPS ലൊക്കേഷനും പുറത്തുപോകുന്നു. AI Deepfake ഒഴിവാക്കാൻ പ്രൊഫൈലുകൾ <strong>Private</strong> ആക്കുക.</p></div>
+            <div class="minimal-card rounded-2xl p-5 border-t-4 border-t-emerald-600 bg-emerald-50/50"><h3 class="text-lg font-bold text-emerald-800 mb-1.5">🚨 4. Golden Hour Emergency Protocol</h3><p class="font-ml text-sm text-slate-800 font-medium"><strong>Zero Payment</strong> ➔ <strong>Save Evidence</strong> ➔ ഉടൻ <span class="px-2 py-0.5 rounded bg-rose-600 text-white font-black">1930</span> (Cyber Crime) അല്ലെങ്കിൽ <span class="px-2 py-0.5 rounded bg-blue-600 text-white font-black">1098</span> വിളിക്കുക!</p></div>
+          </div>
+          <br><a href="https://en.wikipedia.org/wiki/Phishing" target="_blank" rel="noopener noreferrer"
+                class="text-blue-600 underline font-bold hover:text-blue-800">
+                Phishing </a>
+          <br><a href="https://en.wikipedia.org/wiki/Money_mule" target="_blank" rel="noopener noreferrer"
+                class="text-blue-600 underline font-bold hover:text-blue-800">
+                Money Mule </a>
+          <br><a href="https://en.wikipedia.org/wiki/Deepfake" target="_blank" rel="noopener noreferrer"
+                class="text-blue-600 underline font-bold hover:text-blue-800">
+                Deepfakes </a>  
+          <br><a href="https://www.childlineindia.org/a/about/childline-india" target="_blank" rel="noopener noreferrer"
+                class="text-blue-600 underline font-bold hover:text-blue-800">
+                1098 </a>  
+          <br><a href="https://safetech-citizen.kerala.gov.in/awareness-topics/report-cybercrime" target="_blank" rel="noopener noreferrer"
+                class="text-blue-600 underline font-bold hover:text-blue-800">
+                1930 </a>      
+        </section>
+
+        <!-- ==================== SLIDE 21 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-21" data-segment="Segment 9 • Gaming & Social Media (33:00–37:00)">
+          <span class="px-3 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold uppercase w-fit mb-3">Segment 09 • Tool or Trap?</span>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-5">Online Gaming &amp; Social Media: <span class="text-blue-600">Use vs. Abuse</span> 🎮</h2>
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <div class="minimal-card rounded-3xl p-6 border-t-4 border-t-amber-500"><div class="text-3xl mb-2">🎮</div><h3 class="text-lg font-bold text-amber-800 mb-2">WHO Gaming Disorder</h3><ul class="space-y-2 font-ml text-sm text-slate-700"><li>• ലോകാരോഗ്യ സംഘടന അംഗീകരിച്ച രോഗാവസ്ഥ.</li><li>• പഠനത്തോട് വിരക്തി, അമിത ദേഷ്യം, ഉറക്കമില്ലായ്മ.</li><li>• <strong>Loot Boxes &amp; Spins</strong> ചൂതാട്ട സ്വഭാവം വളർത്തുന്നു.</li></ul></div>
+            <div class="minimal-card rounded-3xl p-6 border-t-4 border-t-emerald-600"><div class="text-3xl mb-2">✅</div><h3 class="text-lg font-bold text-emerald-800 mb-2">Healthy Use </h3><ul class="space-y-2 font-ml text-sm text-slate-700"><li>• Coding, Language, Art സ്കില്ലുകൾ പഠിക്കുക.</li><li>• സർഗ്ഗാത്മക കഴിവുകൾ അവതരിപ്പിക്കുക.</li><li>• ഗ്രൗണ്ടിലെ കളികളിലൂടെ Endorphins നേടുക.</li></ul></div>
+            <div class="minimal-card rounded-3xl p-6 border-t-4 border-t-rose-500"><div class="text-3xl mb-2">🚫</div><h3 class="text-lg font-bold text-rose-700 mb-2">Social Media Abuse</h3><ul class="space-y-2 font-ml text-sm text-slate-700"><li>• <strong>Cyberbullying:</strong> ജാമ്യമില്ലാത്ത ക്രിമിനൽ കുറ്റം.</li><li>• <strong>Fake News:</strong> നിയമ ഉത്തരവാദിത്തമുണ്ട്.</li><li>• <strong>Digital Footprint:</strong> ഭാവി ജോലിയെ ബാധിക്കും!</li></ul></div>
+          </div><br>
+          <a href="https://en.wikipedia.org/wiki/Cyberbullying" target="_blank" rel="noopener noreferrer"
+                class="text-blue-600 underline font-bold hover:text-blue-800">
+                Cyberbullying </a><br>
+          <a href="https://en.wikipedia.org/wiki/Digital_footprint" target="_blank" rel="noopener noreferrer"
+                class="text-blue-600 underline font-bold hover:text-blue-800">
+                Digital Footprint </a>
+
+                
+        </section>
+
+        <!-- ==================== SLIDE 22 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-22" data-segment="Segment 10 • AI: Bicycle vs Wheelchair (36:30–39:00)">
+          <span class="px-3 py-1 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold uppercase w-fit mb-3">Segment 10 • Future-Proof Intelligence</span>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-5">AI: <span class="text-blue-600">Bicycle for the Mind</span>, Not a <span class="text-rose-600">Wheelchair!</span> 🤖</h2>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-5">
+            <div class="minimal-card rounded-3xl p-6 border-l-4 border-l-rose-500"><h3 class="text-xl font-bold text-rose-700 mb-3">❌ The Lazy Way (Wheelchair)</h3><ul class="space-y-2.5 font-ml text-base text-slate-700"><li>• ഹോംവർക്ക് കോപ്പി-പേസ്റ്റ് ചെയ്താൽ പരീക്ഷാ ഹാളിൽ തലച്ചോറ് ശൂന്യമാകും.</li><li>• <strong>AI Hallucination:</strong> AI തെറ്റായ വിവരങ്ങൾ ആത്മവിശ്വാസത്തോടെ പറയും.</li><li>• സ്വന്തം ഫോട്ടോകൾ അപരിചിത AI ആപ്പുകളിൽ നൽകരുത്.</li></ul></div>
+            <div class="minimal-card rounded-3xl p-6 border-l-4 border-l-emerald-600"><h3 class="text-xl font-bold text-emerald-800 mb-3">✅ 3 Golden Prompt Rules</h3><ol class="space-y-2.5 font-ml text-base text-slate-700 list-decimal pl-5"><li><strong>&#34;എഴുതിത്തരൂ&#34; അല്ല, &#34;തിരുത്തിത്തരൂ&#34;:</strong> തെറ്റുകൾ ചൂണ്ടിക്കാണിക്കാൻ ചോദിക്കുക.</li><li><strong>ഉത്തരമല്ല, സൂചന (Hint):</strong> ഘട്ടങ്ങൾ ചോദിക്കുക.</li><li><strong>Fact-Check:</strong> SCERT / NCERT പാഠപുസ്തകവുമായി ഒത്തുനോക്കുക.</li></ol></div>
+          </div>
+          <div class="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-center font-bold text-blue-900 text-base sm:text-lg">&#34;Never let AI do your thinking. Let AI sharpen your thinking!&#34;</div>
+        </section>
+
+        <!-- ==================== SLIDE 23 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-23" data-segment="Segment 10B • Internet, AI, Education & Career (39:00–41:30)">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <span class="px-3 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold uppercase">Segment 10B • Future Readiness</span>
+            <span class="px-3 py-1 rounded-lg bg-amber-50 border border-amber-300 text-amber-800 text-xs font-bold">Consumer ➔ Creator Shift</span>
+          </div>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-5">Internet &amp; AI: <span class="text-blue-600">Your Launchpad to Future Careers!</span> 🎓</h2>
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
+            <div class="minimal-card rounded-3xl p-5 border-t-4 border-t-blue-600"><div class="text-3xl mb-2">🏛️</div><h3 class="text-lg font-bold text-blue-800 mb-2">1. Pocket University</h3><ul class="space-y-2 font-ml text-xs sm:text-sm text-slate-700"><li>• <strong>SWAYAM &amp; NPTEL:</strong> IIT / IISc ക്ലാസുകൾ സൗജന്യം.</li><li>• <strong>DIKSHA &amp; OLabs:</strong> 3D സയൻസ് പ്രാക്ടിക്കലുകൾ.</li><li>• <strong>Coursera &amp; Skill India:</strong> പുതിയ സ്കില്ലുകൾ.</li></ul></div>
+            <div class="minimal-card rounded-3xl p-5 border-t-4 border-t-amber-500"><div class="text-3xl mb-2">🚀</div><h3 class="text-lg font-bold text-amber-800 mb-2">2. The 2026 Career Shift</h3><p class="font-ml text-xs sm:text-sm text-slate-700 mb-2"><strong>India Skills Report 2026:</strong> വെറും സർട്ടിഫിക്കറ്റ് പോരാ; പ്രായോഗിക AI സ്കില്ലുകൾ വേണം.</p><div class="p-2.5 rounded-xl bg-amber-50 border border-amber-300 font-ml text-xs text-amber-900 font-bold">&#34;നിങ്ങൾ എന്ത് നിർമ്മിച്ചു? (Proof-of-Work)&#34; എന്നതാണ് പ്രധാനം!</div></div>
+            <div class="minimal-card rounded-3xl p-5 border-t-4 border-t-emerald-600"><div class="text-3xl mb-2">🧠</div><h3 class="text-lg font-bold text-emerald-800 mb-2">3. 4 Human Superpowers</h3><ol class="space-y-1.5 font-ml text-xs sm:text-sm text-slate-700 list-decimal pl-4"><li><strong>Critical Thinking</strong></li><li><strong>Creativity</strong></li><li><strong>Communication &amp; Leadership</strong></li><li><strong>Empathy &amp; Ethics</strong></li></ol></div>
+          </div>
+          <div class="p-4 rounded-2xl bg-indigo-50 border border-indigo-200 text-center font-ml text-base font-bold text-indigo-900">&#34;സ്ക്രീനിലെ വെറുമൊരു ഉപഭോക്താവ് (Consumer) ആകാതെ, സ്വന്തം ഭാവിയുടെ നിർമ്മാതാവ് (Creator) ആകൂ!&#34;</div>
+        </section>
+
+        <!-- ==================== SLIDE 24 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-24" data-segment="Segment 11 • 3 Anti-Algorithm Weapons (41:30–43:30)">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <span class="px-3 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold uppercase">Segment 11 • The 1-2-3 Anti-Algorithm Formula</span>
+            <button id="grayscaleDemoBtn" onclick="toggleGrayscaleMode()" class="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs sm:text-sm shadow transition">⚫⚪ Test Grayscale Mode Live!</button>
+          </div>
+          <h2 class="text-3xl sm:text-5xl font-black text-slate-900 mb-5">3 Practical Weapons <span class="text-blue-600">to Defeat the Algorithm</span> ⚔️</h2>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-5">
+            <div class="minimal-card rounded-3xl p-6 border-t-4 border-t-slate-700"><div class="text-xs font-bold text-slate-600 uppercase mb-1">Weapon #1</div><h3 class="text-xl font-black text-slate-900 mb-2">1-Color Shift (Grayscale)</h3><p class="font-ml text-sm sm:text-base text-slate-700"><em>Settings &gt; Accessibility &gt; Grayscale</em> ഓൺ ആക്കുക. സ്ക്രീൻ ടൈം <strong>40% – 50% കുറയും!</strong></p></div>
+            <div class="minimal-card rounded-3xl p-6 border-t-4 border-t-blue-600"><div class="text-xs font-bold text-blue-700 uppercase mb-1">Weapon #2</div><h3 class="text-xl font-black text-slate-900 mb-2">2-Meter Friction Rule</h3><p class="font-ml text-sm sm:text-base text-slate-700">മേശപ്പുറത്ത് കമഴ്ത്തി വെച്ച ഫോൺ പോലും <strong>15% ബുദ്ധിശക്തി</strong> ചോർത്തും. പഠിക്കുമ്പോൾ ഫോൺ 2 മീറ്റർ അകലെ വെക്കുക!</p></div>
+            <div class="minimal-card rounded-3xl p-6 border-t-4 border-t-indigo-600"><div class="text-xs font-bold text-indigo-700 uppercase mb-1">Weapon #3</div><h3 class="text-xl font-black text-slate-900 mb-2">3-Window Batching</h3><p class="font-ml text-sm sm:text-base text-slate-700">ദിവസത്തിൽ 3 സമയങ്ങളിൽ മാത്രം (<strong>2PM, 6PM, 9PM</strong>) മെസ്സേജുകൾ നോക്കുക.</p></div>
+          </div>
+          <div class="minimal-card rounded-2xl p-4 flex flex-wrap items-center justify-around gap-4 text-xs sm:text-sm font-ml text-slate-700">
+            <span>🚫 <strong>Digital-Free Zones:</strong> പഠന മേശ, ബെഡ്‌റൂം, ഭക്ഷണ മേശ</span>
+            <span>⏰ <strong>Sleep Rule:</strong> ഉറങ്ങുന്നതിന് 1 മണിക്കൂർ മുൻപ് സ്ക്രീൻ മാറ്റിവെക്കുക</span>
+            <span>🎨 <strong>Offline Hobby:</strong> വര, വായന, കളി, സൗഹൃദം</span>
+          </div>
+        </section>
+
+        <!-- ==================== SLIDE 25 ==================== -->
+        <section class="slide-container flex-col justify-center min-h-[74vh]" data-slide-id="builtin-25" data-segment="Segment 12 • Protagonist Protocol & Grand Finale (43:30–45:00)">
+          <div class="text-center mb-4">
+            <span class="px-3 py-1 rounded-lg bg-amber-50 border border-amber-300 text-amber-800 text-xs font-bold uppercase">Segment 12 • The 72-Hour Protagonist Quest</span>
+            <h2 class="text-3xl sm:text-5xl lg:text-6xl font-black text-slate-900 mt-2">Are You an <span class="text-slate-600">NPC</span> or the <span class="text-blue-600">Main Character?</span> 👑</h2>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="minimal-card rounded-3xl p-5 border-2 border-amber-200 text-center"><div class="text-4xl mb-1">🌅</div><div class="font-bold text-amber-800 text-lg">Quest 1: Golden Hour</div><p class="font-ml text-sm text-slate-700 mt-1">രാവിലെ ഉണർന്ന് <strong>ആദ്യത്തെ 60 മിനിറ്റ്</strong> ഫോൺ തൊടരുത്!</p></div>
+            <div class="minimal-card rounded-3xl p-5 border-2 border-blue-200 text-center"><div class="text-4xl mb-1">🔒</div><div class="font-bold text-blue-800 text-lg">Quest 2: Friction Lock</div><p class="font-ml text-sm text-slate-700 mt-1">പഠിക്കുമ്പോൾ ഫോൺ <strong>മറ്റൊരു മുറിയിൽ</strong> വെക്കുക.</p></div>
+            <div class="minimal-card rounded-3xl p-5 border-2 border-emerald-200 text-center"><div class="text-4xl mb-1">👥</div><div class="font-bold text-emerald-800 text-lg">Quest 3: Eye-Contact</div><p class="font-ml text-sm text-slate-700 mt-1">ദിവസവും <strong>15 മിനിറ്റ്</strong> സ്ക്രീനില്ലാതെ നേരിട്ട് സംസാരിക്കുക.</p></div>
+          </div>
+          <div class="rounded-3xl p-8 sm:p-10 bg-slate-900 text-white text-center shadow-xl">
+            <div class="text-sm sm:text-base font-bold uppercase tracking-widest text-amber-400 mb-2">Break out of the 6-inch box!</div>
+            <p class="font-ml text-2xl sm:text-4xl font-extrabold text-white leading-snug mb-3">&#34;സ്വൈപ്പിൽ തീരുന്ന വെറുമൊരു ഫോളോവർ ആകരുത്...<br /> യഥാർത്ഥ ജീവിതത്തിൽ തിളങ്ങുന്ന നായകനാകൂ!&#34;</p>
+            <div class="text-3xl sm:text-5xl font-black tracking-wider text-blue-400">BE SEEN, NOT JUST SCREENED!</div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+
+    <!-- Speaker Notes Drawer -->
+    <aside id="speakerNotesDrawer" class="hidden w-full sm:w-96 lg:w-[420px] border-l border-slate-200 bg-white shadow-xl flex-col z-30">
+      <div class="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wider text-blue-600">🎙️ Speaker Teleprompter</div>
+          <div id="notesSlideTitle" class="text-sm font-bold text-slate-900">Slide 1 Notes</div>
+        </div>
+        <button onclick="toggleSpeakerNotes()" class="p-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700">✕</button>
+      </div>
+      <div id="speakerNotesContent" class="p-5 overflow-y-auto flex-1 font-ml text-sm sm:text-base text-slate-800 leading-relaxed space-y-4"></div>
+    </aside>
+
+  </div>
+
+  <!-- Bottom Navigation Controls Bar -->
+  <footer class="w-full px-4 sm:px-8 py-3 border-t border-slate-200 bg-white/95 backdrop-blur-md flex items-center justify-between z-40 shadow-sm relative">
+    <button id="prevBtn" onclick="changeSlide(-1)" class="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-800 font-bold text-xs sm:text-sm flex items-center gap-2 border border-slate-300 transition">
+      <span>←</span> <span>Previous</span>
+    </button>
+
+    <div class="flex items-center gap-3">
+      <button onclick="toggleOverviewModal()" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-xs sm:text-sm font-extrabold text-blue-700 tracking-wider transition">
+        Slide <span id="slideCounter">1 / 25</span>
+      </button>
+      <span class="hidden md:inline text-xs text-slate-500 font-medium">← → Keys • N: Script • G: Reorder</span>
+    </div>
+
+    <button id="nextBtn" onclick="changeSlide(1)" class="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-extrabold text-xs sm:text-sm flex items-center gap-2 shadow transition">
+      <span>Next</span> <span>→</span>
+    </button>
+  </footer>
+
+  <!-- ==================== MODAL 1: MANAGE & REORDER SLIDES ==================== -->
+  <div id="overviewModal" class="hidden fixed inset-0 bg-slate-900/65 backdrop-blur-sm z-50 flex flex-col p-3 sm:p-6">
+    <div class="max-w-6xl w-full mx-auto flex flex-wrap items-center justify-between gap-3 bg-white p-5 rounded-t-3xl border-b border-slate-200">
+      <div>
+        <h2 class="text-xl sm:text-2xl font-black text-slate-900">Manage, Arrange &amp; Reorder Slides</h2>
+        <p class="text-xs sm:text-sm text-slate-600">Drag &amp; drop cards OR use ▲ ▼ arrows to change order, then click <strong>Save Order</strong>.</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button onclick="openSlideEditorModal()" class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm shadow-sm">＋ New Slide</button>
+        <button onclick="saveOrderNow()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm shadow-sm">💾 Save Order</button>
+        <button onclick="resetDefaultOrder()" class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs sm:text-sm border border-slate-300">↺ Reset Order</button>
+        <button onclick="toggleOverviewModal()" class="px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs sm:text-sm border border-rose-200">✕ Close</button>
+      </div>
+    </div>
+    <div id="overviewGrid" class="max-w-6xl w-full mx-auto grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5 overflow-y-auto p-5 bg-slate-50 rounded-b-3xl border border-slate-200 shadow-2xl flex-1"></div>
+  </div>
+
+  <!-- ==================== MODAL 2: ADD / EDIT CUSTOM SLIDE ==================== -->
+  <div id="slideEditorModal" class="hidden fixed inset-0 bg-slate-900/65 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[92vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+        <div>
+          <h3 id="editorModalHeading" class="text-xl font-black text-slate-900">＋ Add New Slide</h3>
+          <p class="text-xs text-slate-600">Create a projector-ready slide and save to Firebase / Local Storage</p>
+        </div>
+        <button onclick="closeSlideEditorModal()" class="p-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold">✕</button>
+      </div>
+      <div class="p-6 overflow-y-auto space-y-4">
+        <input type="hidden" id="editSlideId" value="" />
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-bold uppercase text-slate-600 mb-1">Segment / Badge Label</label>
+            <input id="editSlideSegment" type="text" placeholder="e.g., Custom Segment • Q&A" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:border-blue-600" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase text-slate-600 mb-1">Accent Color</label>
+            <select id="editSlideColor" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:border-blue-600 bg-white">
+              <option value="blue">Cobalt Blue (Default)</option>
+              <option value="indigo">Deep Indigo</option>
+              <option value="emerald">Emerald Green</option>
+              <option value="amber">Warm Amber</option>
+              <option value="rose">Crimson Rose</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-600 mb-1">Main Headline (English / മലയാളം)</label>
+          <input id="editSlideTitle" type="text" placeholder="Big projector headline..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-base font-bold font-ml focus:outline-none focus:border-blue-600" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-600 mb-1">Subtitle / Highlight Quote</label>
+          <input id="editSlideSubtitle" type="text" placeholder="Optional subtitle or punchline..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-ml focus:outline-none focus:border-blue-600" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-600 mb-1">Slide Content / Bullet Points (One point per line)</label>
+          <textarea id="editSlideBody" rows="4" placeholder="Point 1...&#10;Point 2...&#10;Point 3..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-ml focus:outline-none focus:border-blue-600"></textarea>
+        </div>
+        <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div class="text-xs font-bold uppercase text-slate-700">Concerned Slide Image</div>
+            <div id="editorImageStatus" class="text-xs text-slate-500">No image attached yet</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="openImageUploaderForEditor()" class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">🖼️ Upload / Camera / Drive</button>
+            <button type="button" id="editorRemoveImgBtn" onclick="clearEditorDraftImage()" class="hidden px-3 py-2 rounded-xl bg-rose-100 text-rose-700 text-xs font-bold">Remove</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-bold uppercase text-slate-600 mb-1">Speaker Stage Action</label>
+            <input id="editSlideAction" type="text" placeholder="e.g., Ask audience to raise hands..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-ml focus:outline-none focus:border-blue-600" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase text-slate-600 mb-1">Speaker Script</label>
+            <input id="editSlideScript" type="text" placeholder="What to speak on stage..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-ml focus:outline-none focus:border-blue-600" />
+          </div>
+        </div>
+      </div>
+      <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-3">
+        <button onclick="closeSlideEditorModal()" class="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 text-sm font-bold">Cancel</button>
+        <button onclick="saveCustomSlide()" class="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-black shadow">💾 Save Slide</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL 3: UNIVERSAL IMAGE UPLOADER (FILES, CAMERA, DRIVE, GALLERY) ==================== -->
+  <div id="imageUploadModal" class="hidden fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+        <div>
+          <h3 class="text-xl font-black text-slate-900">🖼️ Image Studio — Upload &amp; Save</h3>
+          <p id="imgModalTargetLabel" class="text-xs text-blue-700 font-semibold">Target: Current Slide</p>
+        </div>
+        <button onclick="closeImageUploadModal()" class="p-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold">✕</button>
+      </div>
+
+      <!-- Placement Selector -->
+      <div id="imgPlacementBar" class="px-6 py-3 bg-blue-50/70 border-b border-blue-100 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-4 text-xs sm:text-sm font-bold text-slate-800">
+          <label class="flex items-center gap-1.5 cursor-pointer">
+            <input type="radio" name="imgPlacement" value="feature" checked onchange="toggleBgOpacityControl()" />
+            <span>📌 Slide Feature Image</span>
+          </label>
+          <label class="flex items-center gap-1.5 cursor-pointer">
+            <input type="radio" name="imgPlacement" value="background" onchange="toggleBgOpacityControl()" />
+            <span>🌄 Slide Background Image</span>
+          </label>
+        </div>
+        <div id="bgOpacityControl" class="hidden flex items-center gap-2 text-xs font-bold text-slate-700">
+          <span>BG Opacity:</span>
+          <input id="bgOpacitySlider" type="range" min="5" max="45" value="16" class="w-24 accent-blue-600" />
+          <span id="bgOpacityValue">16%</span>
+        </div>
+      </div>
+
+      <!-- 4 Source Tabs -->
+      <div class="px-6 pt-3 border-b border-slate-200 flex flex-wrap gap-2 bg-white">
+        <button onclick="switchImageTab('files')" id="tabBtn-files" class="img-tab-btn px-4 py-2 rounded-t-xl text-xs sm:text-sm font-bold border-b-2 border-blue-600 text-blue-700 bg-blue-50/60">📁 Device / Files</button>
+        <button onclick="switchImageTab('camera')" id="tabBtn-camera" class="img-tab-btn px-4 py-2 rounded-t-xl text-xs sm:text-sm font-bold border-b-2 border-transparent text-slate-600 hover:text-slate-900">📷 Direct Camera</button>
+        <button onclick="switchImageTab('drive')" id="tabBtn-drive" class="img-tab-btn px-4 py-2 rounded-t-xl text-xs sm:text-sm font-bold border-b-2 border-transparent text-slate-600 hover:text-slate-900">☁️ Google Drive</button>
+        <button onclick="switchImageTab('gallery')" id="tabBtn-gallery" class="img-tab-btn px-4 py-2 rounded-t-xl text-xs sm:text-sm font-bold border-b-2 border-transparent text-slate-600 hover:text-slate-900">🖼️ Saved &amp; Suggestions</button>
+      </div>
+
+      <!-- Tab Panels -->
+      <div class="p-6 overflow-y-auto flex-1 space-y-5">
+
+        <!-- TAB 1: DEVICE FILES -->
+        <div id="tabPanel-files" class="img-tab-panel space-y-4">
+          <label id="fileDropZone" class="flex flex-col items-center justify-center w-full h-44 border-2 border-dashed border-slate-300 rounded-2xl bg-slate-50 hover:bg-blue-50/40 hover:border-blue-400 cursor-pointer transition p-4 text-center">
+            <div class="text-4xl mb-2">📂</div>
+            <div class="text-sm sm:text-base font-bold text-slate-800">Click to browse files or drag an image here</div>
+            <div class="text-xs text-slate-500 mt-1">PNG, JPG, WEBP • Auto-compressed &amp; saved directly to Firebase Cloud (100% Free Spark Plan)</div>
+            <input id="deviceFileInput" type="file" accept="image/*" class="hidden" onchange="handleFileUploadInput(event)" />
+          </label>
+        </div>
+
+        <!-- TAB 2: DIRECT CAMERA -->
+        <div id="tabPanel-camera" class="img-tab-panel hidden space-y-4">
+          <div class="rounded-2xl bg-slate-900 overflow-hidden relative aspect-video max-h-64 mx-auto flex items-center justify-center">
+            <video id="cameraVideo" autoplay playsinline class="w-full h-full object-cover hidden"></video>
+            <canvas id="cameraCanvas" class="hidden"></canvas>
+            <div id="cameraPlaceholder" class="text-center p-6 text-slate-300">
+              <div class="text-4xl mb-2">📷</div>
+              <p class="text-sm font-semibold">Click "Start Live Camera" below or use Mobile Native Camera</p>
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center justify-center gap-2.5">
+            <button onclick="startLiveCamera()" id="startCamBtn" class="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold">▶ Start Live Camera</button>
+            <button onclick="flipCameraFacing()" id="flipCamBtn" class="hidden px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs sm:text-sm font-bold">🔄 Flip Camera</button>
+            <button onclick="captureCameraPhoto()" id="captureCamBtn" class="hidden px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-black shadow">📸 Capture Photo</button>
+            <label class="px-4 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 text-xs sm:text-sm font-bold cursor-pointer">
+              📱 Mobile Native Camera
+              <input type="file" accept="image/*" capture="environment" class="hidden" onchange="handleFileUploadInput(event)" />
+            </label>
+          </div>
+        </div>
+
+        <!-- TAB 3: GOOGLE DRIVE -->
+        <div id="tabPanel-drive" class="img-tab-panel hidden space-y-4">
+          <div class="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-xs sm:text-sm text-blue-900 space-y-1.5">
+            <div class="font-bold">☁️ Import Image Directly from Google Drive</div>
+            <p>1. Open Google Drive, right-click any image → <strong>Share → Anyone with the link</strong> → Copy link.</p>
+            <p>2. Paste the link below — it automatically converts to a high-res projector image!</p>
+          </div>
+          <div class="flex flex-col sm:flex-row gap-2">
+            <input id="driveUrlInput" type="url" placeholder="Paste Google Drive share link or direct image URL..." class="flex-1 px-4 py-3 rounded-xl border border-slate-300 text-sm focus:outline-none focus:border-blue-600" />
+            <button onclick="applyDriveOrUrlInput()" class="px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm">Load Preview</button>
+          </div>
+          <div class="flex flex-wrap items-center gap-3 pt-1">
+            <a href="https://drive.google.com/drive/my-drive" target="_blank" rel="noopener" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-800 text-xs font-bold">↗ Open My Google Drive</a>
+            <span class="text-xs text-slate-500">Supports <code>drive.google.com/file/d/...</code>, <code>open?id=...</code>, and direct HTTPS URLs.</span>
+          </div>
+        </div>
+
+        <!-- TAB 4: SAVED GALLERY & SUGGESTIONS -->
+        <div id="tabPanel-gallery" class="img-tab-panel hidden space-y-5">
+          <div>
+            <h4 class="text-xs font-black uppercase tracking-wider text-slate-600 mb-2.5">💾 Your Saved Concerned Images Library</h4>
+            <div id="savedGalleryGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-3"></div>
+          </div>
+          <div>
+            <h4 class="text-xs font-black uppercase tracking-wider text-blue-700 mb-2.5">✨ Curated Projector Suggestions (1-Click Apply)</h4>
+            <div id="suggestedGalleryGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-3"></div>
+          </div>
+        </div>
+
+        <!-- Live Preview & Caption Area -->
+        <div id="pendingImagePreviewBox" class="hidden p-4 rounded-2xl bg-slate-50 border-2 border-blue-200 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-black uppercase text-blue-700">✅ Selected Image Ready to Save</span>
+            <button onclick="clearPendingImage()" class="text-xs font-bold text-rose-600 hover:underline">Clear Selection</button>
+          </div>
+          <div class="flex flex-col sm:flex-row gap-4 items-center">
+            <img id="pendingPreviewImg" src="" alt="Preview" class="w-full sm:w-44 h-28 object-cover rounded-xl border border-slate-300 bg-white" />
+            <div class="flex-1 w-full space-y-2">
+              <label class="block text-xs font-bold text-slate-600">Optional Caption / Label</label>
+              <input id="pendingImgCaption" type="text" placeholder="e.g., Students Auditorium Session..." class="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm" />
+              <div id="uploadProgressMsg" class="text-xs text-slate-500">Ready to save to slide &amp; backend library.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer Buttons -->
+      <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-center gap-2">
+          <button id="removeCurrentFeatureBtn" onclick="removeMediaFromSlide('feature')" class="hidden px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold border border-rose-200">🗑 Remove Slide Image</button>
+          <button id="removeCurrentBgBtn" onclick="removeMediaFromSlide('background')" class="hidden px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold border border-amber-200">🗑 Remove BG Image</button>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="closeImageUploadModal()" class="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs sm:text-sm font-bold">Close</button>
+          <button id="confirmSaveImageBtn" onclick="confirmApplyAndSaveImage()" class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-black shadow">💾 Save Image to Slide &amp; Cloud</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL 4: FIREBASE BACKEND CONFIGURATION ==================== -->
+  <div id="firebaseModal" class="hidden fixed inset-0 bg-slate-900/65 backdrop-blur-sm z-[80] flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+        <div>
+          <h3 class="text-xl font-black text-slate-900">🔥 Firebase Cloud Backend Setup</h3>
+          <p class="text-xs text-slate-600">Saves Slides, Order &amp; All Images to Firestore (100% Free Spark Plan Compatible)</p>
+        </div>
+        <button onclick="closeFirebaseModal()" class="p-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold">✕</button>
+      </div>
+      <div class="p-6 overflow-y-auto space-y-4 text-sm">
+        <div id="fbStatusBanner" class="p-4 rounded-2xl bg-slate-100 border border-slate-200 font-bold text-slate-800">
+          Status: Running in Local Mode. Paste your Firebase config below to connect!
+        </div>
+
+        <!-- Live Diagnostic Error / Success Box -->
+        <div id="fbDiagnosticBox" class="hidden p-3.5 rounded-2xl border text-xs font-mono whitespace-pre-wrap"></div>
+
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-600 mb-1.5">
+            Paste Directly from Firebase Console (JS object OR JSON both work!)
+          </label>
+          <textarea id="firebaseConfigInput" rows="8" placeholder='const firebaseConfig = {
+  apiKey: "AIzaSy...",
+  authDomain: "your-project.firebaseapp.com",
+  projectId: "your-project",
+  storageBucket: "your-project.firebasestorage.app",
+  messagingSenderId: "123456789",
+  appId: "1:123456789:web:abcdef"
+};' class="w-full font-mono text-xs p-3.5 rounded-xl border border-slate-300 bg-slate-50 focus:outline-none focus:border-blue-600"></textarea>
+        </div>
+
+        <div class="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-xs text-blue-900 space-y-1.5">
+          <div class="font-bold">⚡ Required Firestore Rules (Publish in Firebase Console → Firestore → Rules):</div>
+          <pre class="bg-white/90 p-2.5 rounded-xl border border-blue-200 text-[11px] overflow-x-auto text-slate-800">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /presentations/screen-to-seen { allow read, write: if true; }
+    match /presentations/screen-to-seen/images/{imageId} { allow read, write: if true; }
+    match /{document=**} { allow read, write: if false; }
+  }
+}</pre>
+        </div>
+      </div>
+      <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2">
+        <button onclick="disconnectFirebase()" class="px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold border border-rose-200">Disconnect</button>
+        <div class="flex flex-wrap items-center gap-2">
+          <button onclick="testFirebaseConnection()" id="testFbBtn" class="hidden px-3.5 py-2.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-bold border border-amber-300">🧪 Test Save</button>
+          <button onclick="forcePushAllToCloud()" id="syncNowBtn" class="hidden px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">☁️ Sync All Now</button>
+          <button onclick="saveAndConnectFirebase()" class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-black shadow">🔥 Connect &amp; Sync</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ==================== BUILT-IN SPEAKER SCRIPT DATA ====================
+    const builtinNotesMap = {
+      'builtin-1': { title: "Title Slide — SCREEN TO SEEN", action: "വേദിയുടെ ഒത്ത നടുവിലേക്ക് ആത്മവിശ്വാസത്തോടെ നടന്നു വരിക. 3 സെക്കൻഡ് പുഞ്ചിരിക്കുക.", script: "എല്ലാവർക്കും നമസ്കാരം! നമ്മുടെ 45 മിനിറ്റ് മാസ്റ്റർക്ലാസ്സിലേക്ക് സ്വാഗതം. 'Don't be just a follower in reel life! Be a Fire in real life!'" },
+      'builtin-2': { title: "Segment 1 — Who Wants to Leave First?", action: "ഉപദേശ ശൈലി ഒഴിവാക്കി സൗഹൃദപരമായി സംസാരിക്കുക.", script: "ഈ സെഷൻ എത്രയും വേഗം തീർത്ത് ആദ്യം പുറത്തുപോകണം എന്ന് ആഗ്രഹിക്കുന്നത് ഞാനാണ്... പക്ഷേ എന്നേക്കാൾ മുൻപ് വാതിൽ തുറന്ന് ഓടാൻ ആഗ്രഹിക്കുന്നത് നിങ്ങളാണ്, അല്ലേ?" },
+      'builtin-3': { title: "Challenge 1 — 3-Line Lateral Slice", action: "കുട്ടികൾക്ക് 30 സെക്കൻഡ് സമയം നൽകുക.", script: "കൈയെടുക്കാതെ, കൃത്യം 3 നേർവരകൾ കൊണ്ട് ഈ 9 ഡോട്ടുകളെയും സ്പർശിക്കാമോ?" },
+      'builtin-4': { title: "Challenge 1 Reveal — Physical Thickness", action: "Reveal 3-Line Solution കാണിച്ച ശേഷം ജീവിത ബന്ധം പറയുക.", script: "ചോദ്യത്തിൽ 'ഡോട്ടിന്റെ നടുവിലൂടെ വരയ്ക്കണം' എന്ന് ആരും പറഞ്ഞിരുന്നില്ല. Do not invent unstated limits!"  },
+      'builtin-5': { title: "Challenge 2 — 4-Line Box-Break", action: "ക്ലാസിൽ നിന്ന് ഒരു വോളണ്ടിയറെ വേദിയിലേക്ക് വിളിക്കുക.", script: "9 ഡോട്ടുകളുടെയും കൃത്യം നടുവിലൂടെ 4 നേർവരകൾ കൊണ്ട് വരയ്ക്കുക. ചതുരത്തിന് പുറത്തേക്ക് വര നീട്ടണം!" },
+      'builtin-6': { title: "Master Transition — 6-Inch Box & Welcome", action: "സ്മാർട്ട്‌ഫോൺ ഉയർത്തിപ്പിടിച്ച് ആവേശത്തോടെ സംസാരിക്കുക.", script: "നമ്മുടെ കൈയിലെ സ്മാർട്ട്‌ഫോണും ഒരു 6-ഇഞ്ച് ബോക്സാണ്! LET US MOVE FROM SCREEN TO SEEN!" },
+      'builtin-7': { title: "Stand-Up Reality Poll (Top 5)", action: "എല്ലാവരോടും എഴുന്നേറ്റു നിൽക്കാൻ ആവശ്യപ്പെടുക.", script: "ഇതൊരു No-Shaming Zone ആണ്. ഉത്തരം 'അതെ' എങ്കിൽ ഇരിക്കാം!" },
+      'builtin-8': { title: "Reality Poll Verdict", action: "എല്ലാവരെയും സീറ്റിൽ ഇരുത്തുക.", script: "ഈ ഹാളിൽ ഒരാൾ പോലും ഇരുന്നില്ല! നിങ്ങൾക്കെതിരെ പ്രവർത്തിക്കുന്നത് ലോകത്തെ ഏറ്റവും വലിയ Behavioral Engineering System ആണ്!" },
+      'builtin-9': { title: "The Bat & Ball Reaction Trap", action: "വേഗത്തിൽ ഉത്തരം ചോദിക്കുക.", script: "ബാറ്റ് + ബോൾ = ₹110. ബാറ്റിന് ₹100 കൂടുതൽ. ബോളിന്റെ വില എത്ര?" },
+      'builtin-10': { title: "System 1 vs. System 2", action: "ഡാനിയൽ കാഹ്നെമാന്റെ തിയറി വിശദീകരിക്കുക.", script: "ചിന്തിക്കാതെ പ്രതികരിക്കുന്ന System 1 ആണ് ₹10 എന്ന് പറയിപ്പിച്ചത്. System 2 ആണ് ₹5 എന്ന് കണ്ടെത്തുന്നത്." },
+      'builtin-11': { title: "Stroop Effect Live Experiment", action: "മഷിയുടെ നിറം ഉറക്കെ പറയിപ്പിക്കുക.", script: "വാക്ക് വായിക്കരുത്, നിറം മാത്രം പറയൂ!" },
+      'builtin-12': { title: "Cognitive Hijacking", action: "പരീക്ഷാ ഹാളിലെ അപകടം ബോധ്യപ്പെടുത്തുക.", script: "ചുവന്ന നോട്ടിഫിക്കേഷൻ ഡോട്ട് System 1-നെ ഉണർത്തി System 2-നെ ഉറക്കിക്കിടത്തുന്നു." },
+      'builtin-13': { title: "Silicon Valley's 5 Shocking Truths", action: "5 സത്യങ്ങൾ ഗൗരവത്തോടെ അവതരിപ്പിക്കുക.", script: "സ്റ്റീവ് ജോബ്സ്, ബിൽ ഗേറ്റ്സ്, വാൾഡോർഫ് സ്കൂളുകൾ — ലഹരി ഉണ്ടാക്കുന്നവർ സ്വന്തം മക്കൾക്ക് ആ ലഹരി നൽകുന്നില്ല!" },
+      'builtin-14': { title: "The Attention Economy", action: "സൗജന്യ ആപ്പുകളുടെ ബിസിനസ്സ് മോഡൽ വ്യക്തമാക്കുക.", script: "'If you are not paying for a product, you are the product.' ആപ്പ് സൗജന്യമായിരിക്കാം, പക്ഷേ നിങ്ങളുടെ സമയത്തിന് വിലയുണ്ട്!" },
+      'builtin-15': { title: "The Pocket Casino & Dopamine Loop", action: "സ്ക്രോൾ ചെയ്യുന്ന ആക്ഷൻ കാണിക്കുക.", script: "അസാ റാസ്കിന്റെ BBC മാപ്പ്, Cornell 73% സൂപ്പ് ബൗൾ പഠനം, ദിവസവും 2,617 തവണ സ്ക്രീനിൽ തൊടുന്ന കണക്ക്." },
+      'builtin-16': { title: "Multitasking Trap & Attention Residue", action: "Start Timer ഉപയോഗിച്ച് Round 1 vs Round 2 അളക്കുക.", script: "ഒരൊറ്റ നോട്ടിഫിക്കേഷൻ നോക്കിയാൽ Deep Focus തിരികെ ലഭിക്കാൻ 23 മിനിറ്റും 15 സെക്കൻഡും വേണം!" },
+      'builtin-17': { title: "Global Research & India's TikTok Ban", action: "2020 ജൂൺ 29 TikTok നിരോധന കാരണങ്ങൾ പറയുക.", script: "ദേശീയ സുരക്ഷയ്ക്കും ഡാറ്റാ സ്വകാര്യതയ്ക്കും വേണ്ടിയാണ് ഇന്ത്യ 59 ആപ്പുകൾ നിരോധിച്ചത്." },
+      'builtin-18': { title: "Physical Health Impact", action: "കഴുത്ത് 60 ഡിഗ്രി കുനിച്ച് കാണിക്കുക.", script: "27 kg ഭാരം, 20-20-20 ഐ റൂൾ, മെലറ്റോണിൻ ബ്ലോക്ക്." },
+      'builtin-19': { title: "Mental Health Challenges", action: "കരുതലോടെ സംസാരിക്കുക.", script: "1% Highlight Reel കണ്ട് 100% ജീവിതവുമായി താരതമ്യം ചെയ്യരുത്." },
+      'builtin-20': { title: "Cyber Security & 1930 Protocol", action: "1930 നമ്പർ ഉറക്കെ പറയിപ്പിക്കുക.", script: "Zero Payment ➔ Save Evidence ➔ ഉടൻ 1930 അല്ലെങ്കിൽ 1098 വിളിക്കുക!" },
+      'builtin-21': { title: "Online Gaming & Social Media", action: "WHO Gaming Disorder, Digital Footprint വിശദീകരിക്കുക.", script: "ഗെയിം കളിക്കുന്നത് തെറ്റല്ല, പക്ഷേ ഗെയിം നിങ്ങളെ വെച്ച് കളിക്കരുത്." },
+      'builtin-22': { title: "AI — Bicycle vs Wheelchair", action: "ജിമ്മിലെ ട്രെയിനർ ഉദാഹരണം പറയുക.", script: "AI തലച്ചോറിനുള്ള സൈക്കിൾ ആകണം, വീൽചെയർ ആകരുത്!" },
+      'builtin-23': { title: "Internet, AI, Education & Career", action: "Consumer-ൽ നിന്ന് Creator ആകാൻ ആഹ്വാനം ചെയ്യുക.", script: "SWAYAM, NPTEL, DIKSHA, India Skills Report 2026 & 4 Human Superpowers." },
+      'builtin-24': { title: "3 Anti-Algorithm Weapons", action: "Test Grayscale Mode Live ക്ലിക്ക് ചെയ്ത് കാണിക്കുക!", script: "1-Color Shift, 2-Meter Friction Rule, 3-Window Batching." },
+      'builtin-25': { title: "Protagonist Protocol & Grand Finale", action: "ഊർജ്ജസ്വലമായി സമാപന മാനിഫെസ്റ്റോ പറയുക.", script: "BE SEEN, NOT JUST SCREENED!" }
+    };
+
+    const CURATED_SUGGESTIONS = [
+      { label: "Youth Auditorium", url: "https://images.unsplash.com/photo-1524178232363-1fb2b075b655?auto=format&fit=crop&w=1200&q=80" },
+      { label: "Deep Focus Study", url: "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&w=1200&q=80" },
+      { label: "Smartphone Screen", url: "https://images.unsplash.com/photo-1512499617640-c74ae3a79d37?auto=format&fit=crop&w=1200&q=80" },
+      { label: "Neuroscience & AI", url: "https://images.unsplash.com/photo-1507413245164-6160d8298b31?auto=format&fit=crop&w=1200&q=80" },
+      { label: "Cyber Security", url: "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=1200&q=80" },
+      { label: "Future Career", url: "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80" }
+    ];
+
+    // ==================== APPLICATION STATE ====================
+    const STORAGE_KEY_STATE = 's2s_studio_state_v3';
+    const STORAGE_KEY_FB = 's2s_firebase_config_v3';
+    const DEFAULT_BUILTIN_ORDER = Array.from({ length: 25 }, (_, i) => `builtin-${i + 1}`);
+
+    let appState = {
+      order: [...DEFAULT_BUILTIN_ORDER],
+      customSlides: {},
+      slideMedia: {},
+      savedImages: []
+    };
+
+    let currentSlideIndex = 0;
+    let fbApp = null, fbDb = null, isFirebaseConnected = false;
+    let firestoreImageCache = {}; // Maps imgId -> dataUrl loaded from Firestore subcollection
+
+    // Image Uploader State
+    let imageUploadTargetMode = 'slide'; // 'slide' or 'editor'
+    let imageUploadTargetSlideId = null;
+    let pendingImageDataUrlOrUrl = null;
+    let pendingImageBlob = null;
+    let pendingImageSource = 'files';
+    let editorDraftImage = null;
+    let activeCameraStream = null;
+    let cameraFacingMode = 'environment';
+
+    // ==================== HELPERS ====================
+    let toastTimer = null;
+    function showToast(msg, icon = '✅') {
+      const el = document.getElementById('toastNotification');
+      document.getElementById('toastIcon').textContent = icon;
+      document.getElementById('toastMsg').textContent = msg;
+      el.classList.remove('hidden');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.add('hidden'), 3500);
+    }
+
+    function escapeHtml(str) {
+      return String(str || '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+    }
+
+    function resolveImageUrl(val) {
+      if (!val) return '';
+      if (typeof val === 'string' && val.startsWith('fsimg:')) {
+        return firestoreImageCache[val.slice(6)] || '';
+      }
+      return val;
+    }
+
+    function sanitizeForFirestore(obj) {
+      return JSON.parse(JSON.stringify(obj));
+    }
+
+    function withTimeout(promise, ms = 12000, label = 'Cloud save') {
+      return Promise.race([
+        promise,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s. Check internet or Firebase Console → Firestore Database.`)), ms)
+        )
+      ]);
+    }
+
+    function showFbDiagnostic(message, isError = false) {
+      const box = document.getElementById('fbDiagnosticBox');
+      if (!box) return;
+      box.classList.remove('hidden');
+      box.className = isError
+        ? 'p-3.5 rounded-2xl border text-xs font-mono whitespace-pre-wrap bg-rose-50 border-rose-300 text-rose-800'
+        : 'p-3.5 rounded-2xl border text-xs font-mono whitespace-pre-wrap bg-emerald-50 border-emerald-300 text-emerald-900';
+      box.textContent = message;
+    }
+
+    // Accepts raw JS copy-paste from Firebase Console OR strict JSON
+    function parseFirebaseConfigInput(raw) {
+      let cleaned = raw.trim();
+      cleaned = cleaned.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+      const start = cleaned.indexOf('{');
+      const end = cleaned.lastIndexOf('}');
+      if (start === -1 || end === -1) throw new Error('Could not find { ... } config block.');
+      cleaned = cleaned.slice(start, end + 1);
+      cleaned = cleaned
+        .replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":')
+        .replace(/'/g, '"')
+        .replace(/,\s*}/g, '}');
+      return JSON.parse(cleaned);
+    }
+
+    // ==================== PERSISTENCE (LOCAL + FIRESTORE) ====================
+    function loadLocalState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY_STATE);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.order && Array.isArray(parsed.order) && parsed.order.length > 0) {
+            appState.order = parsed.order;
+          }
+          appState.customSlides = parsed.customSlides || {};
+          appState.slideMedia = parsed.slideMedia || {};
+          appState.savedImages = parsed.savedImages || [];
+        }
+      } catch (e) {
+        console.warn('Local load error:', e);
+      }
+    }
+
+    // Moves any raw base64 images into individual Firestore docs so main doc stays tiny (< 30 KB)
+    async function migrateRawBase64ToFirestoreImages() {
+      if (!isFirebaseConnected || !fbDb) return;
+      const imgCol = fbDb.collection('presentations').doc('screen-to-seen').collection('images');
+
+      for (const slideId of Object.keys(appState.slideMedia)) {
+        const m = appState.slideMedia[slideId];
+        if (m.featureImage && m.featureImage.startsWith('data:image/')) {
+          const imgId = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          await withTimeout(imgCol.doc(imgId).set({ dataUrl: m.featureImage, caption: m.featureCaption || '', createdAt: Date.now() }), 12000, 'Image migration');
+          firestoreImageCache[imgId] = m.featureImage;
+          m.featureImage = `fsimg:${imgId}`;
+        }
+        if (m.bgImage && m.bgImage.startsWith('data:image/')) {
+          const imgId = `bg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          await withTimeout(imgCol.doc(imgId).set({ dataUrl: m.bgImage, caption: 'Background', createdAt: Date.now() }), 12000, 'BG migration');
+          firestoreImageCache[imgId] = m.bgImage;
+          m.bgImage = `fsimg:${imgId}`;
+        }
+      }
+
+      for (const item of appState.savedImages) {
+        if (item.url && item.url.startsWith('data:image/')) {
+          const imgId = `gal_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          await withTimeout(imgCol.doc(imgId).set({ dataUrl: item.url, caption: item.caption || '', createdAt: item.createdAt || Date.now() }), 12000, 'Gallery migration');
+          firestoreImageCache[imgId] = item.url;
+          item.url = `fsimg:${imgId}`;
+        }
+      }
+    }
+
+    async function persistState(toastLabel = 'Saved!') {
+      try {
+        localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(appState));
+      } catch (e) {
+        console.warn('LocalStorage quota reached (using Firebase Cloud).');
+      }
+
+      if (isFirebaseConnected && fbDb) {
+        try {
+          await migrateRawBase64ToFirestoreImages();
+          const cleanPayload = sanitizeForFirestore({
+            order: appState.order,
+            customSlides: appState.customSlides,
+            slideMedia: appState.slideMedia,
+            savedImages: appState.savedImages
+          });
+          await withTimeout(
+            fbDb.collection('presentations').doc('screen-to-seen').set({
+              ...cleanPayload,
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true }),
+            12000,
+            'Firestore save'
+          );
+          try { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(appState)); } catch (_) {}
+          showFbDiagnostic(`✅ Last Sync Success: ${new Date().toLocaleTimeString()} (${toastLabel})`, false);
+          showToast(`${toastLabel} (Saved to Firebase ☁️)`);
+          return;
+        } catch (err) {
+          console.error('Firestore sync error:', err);
+          showFbDiagnostic(`❌ Firestore Write Error:\nCode: ${err.code || 'timeout/unknown'}\nMessage: ${err.message}`, true);
+          showToast(`Firebase Error: ${err.code || err.message}`, '❌');
+          return;
+        }
+      }
+      showToast(`${toastLabel} (Saved Locally 💾)`);
+    }
+
+    // ==================== FIREBASE CONNECTION ====================
+    async function initFirebaseFromSavedConfig() {
+      const savedCfg = localStorage.getItem(STORAGE_KEY_FB);
+      if (!savedCfg) return;
+      try {
+        const cfgObj = JSON.parse(savedCfg);
+        document.getElementById('firebaseConfigInput').value = JSON.stringify(cfgObj, null, 2);
+        await connectFirebaseWithConfig(cfgObj, false);
+      } catch (e) {
+        console.warn('Saved Firebase config invalid:', e);
+      }
+    }
+
+    async function connectFirebaseWithConfig(cfgObj, pushLocalIfEmpty = true) {
+      try {
+        if (firebase.apps.length) {
+          await Promise.all(firebase.apps.map(a => a.delete()));
+        }
+        fbApp = firebase.initializeApp(cfgObj);
+        fbDb = firebase.firestore();
+        isFirebaseConnected = true;
+
+        updateFirebaseStatusUI(true, cfgObj.projectId);
+
+        const docRef = fbDb.collection('presentations').doc('screen-to-seen');
+        const imgSnaps = await withTimeout(docRef.collection('images').get(), 12000, 'Load cloud images');
+        imgSnaps.forEach(d => {
+          const data = d.data();
+          if (data && data.dataUrl) firestoreImageCache[d.id] = data.dataUrl;
+        });
+
+        const snap = await withTimeout(docRef.get(), 12000, 'Load cloud presentation');
+        if (snap.exists) {
+          const cloudData = snap.data();
+          if (cloudData.order && cloudData.order.length) appState.order = cloudData.order;
+          if (cloudData.customSlides) appState.customSlides = cloudData.customSlides;
+          if (cloudData.slideMedia) appState.slideMedia = cloudData.slideMedia;
+          if (cloudData.savedImages) appState.savedImages = cloudData.savedImages;
+          try { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(appState)); } catch (_) {}
+          rebuildStageDOM();
+          updateSlideUI();
+          showFbDiagnostic(`✅ Connected to "${cfgObj.projectId}"!\nLoaded ${appState.order.length} slides & ${imgSnaps.size} saved cloud images.`, false);
+          showToast('Connected & loaded from Firebase!', '🔥');
+        } else if (pushLocalIfEmpty) {
+          await persistState('Initial Firebase Sync');
+        }
+      } catch (err) {
+        isFirebaseConnected = false;
+        updateFirebaseStatusUI(false);
+        showFbDiagnostic(`❌ Connection Failed:\nCode: ${err.code || 'unknown'}\nMessage: ${err.message}`, true);
+        showToast('Firebase error: ' + (err.code || err.message), '❌');
+      }
+    }
+
+    function updateFirebaseStatusUI(connected, projectId = '') {
+      const pill = document.getElementById('cloudStatusPill');
+      const banner = document.getElementById('fbStatusBanner');
+      const syncBtn = document.getElementById('syncNowBtn');
+      const testBtn = document.getElementById('testFbBtn');
+      if (connected) {
+        pill.textContent = `☁️ Firebase Live (${projectId})`;
+        pill.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100 transition';
+        banner.textContent = `✅ Connected to Firebase Project: ${projectId}`;
+        banner.className = 'p-4 rounded-2xl bg-emerald-50 border border-emerald-300 font-bold text-emerald-900';
+        syncBtn.classList.remove('hidden');
+        if (testBtn) testBtn.classList.remove('hidden');
+      } else {
+        pill.textContent = '💾 Local Mode • Connect Firebase';
+        pill.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-300 hover:bg-blue-50 hover:text-blue-700 transition';
+        banner.textContent = 'Status: Running in Local Mode. Paste your Firebase config below to connect!';
+        banner.className = 'p-4 rounded-2xl bg-slate-100 border border-slate-200 font-bold text-slate-800';
+        syncBtn.classList.add('hidden');
+        if (testBtn) testBtn.classList.add('hidden');
+      }
+    }
+
+    function openFirebaseModal() { document.getElementById('firebaseModal').classList.remove('hidden'); }
+    function closeFirebaseModal() { document.getElementById('firebaseModal').classList.add('hidden'); }
+
+    async function saveAndConnectFirebase() {
+      const raw = document.getElementById('firebaseConfigInput').value.trim();
+      if (!raw) {
+        showFbDiagnostic('⚠️ Please paste your Firebase config first.', true);
+        return;
+      }
+      try {
+        const cfg = parseFirebaseConfigInput(raw);
+        if (!cfg.apiKey || !cfg.projectId) throw new Error('Config is missing apiKey or projectId.');
+        localStorage.setItem(STORAGE_KEY_FB, JSON.stringify(cfg));
+        await connectFirebaseWithConfig(cfg, true);
+      } catch (e) {
+        showFbDiagnostic(`❌ Config Parse Error:\n${e.message}`, true);
+        showToast('Invalid Firebase config! Check details in modal.', '❌');
+      }
+    }
+
+    async function testFirebaseConnection() {
+      if (!isFirebaseConnected || !fbDb) {
+        showFbDiagnostic('⚠️ Connect Firebase first!', true);
+        return;
+      }
+      showFbDiagnostic('⏳ Testing Firestore write & read...', false);
+      try {
+        const testRef = fbDb.collection('presentations').doc('screen-to-seen');
+        await withTimeout(testRef.set({ lastConnectionTest: new Date().toISOString() }, { merge: true }), 10000, 'Test write');
+        const check = await withTimeout(testRef.get(), 10000, 'Test read');
+        showFbDiagnostic(`✅ TEST PASSED!\nFirestore Read & Write working perfectly!\nTimestamp recorded: ${check.data().lastConnectionTest}`, false);
+        showToast('Firebase Write & Read Test Passed!', '✅');
+      } catch (err) {
+        showFbDiagnostic(`❌ TEST FAILED!\nCode: ${err.code || 'timeout'}\nMessage: ${err.message}\n\n👉 Fix: Go to Firebase Console → Firestore Database → Rules and publish the rules shown below.`, true);
+      }
+    }
+
+    async function forcePushAllToCloud() {
+      await persistState('All slides & media synced');
+    }
+
+    function disconnectFirebase() {
+      localStorage.removeItem(STORAGE_KEY_FB);
+      isFirebaseConnected = false;
+      fbDb = null;
+      updateFirebaseStatusUI(false);
+      showFbDiagnostic('Disconnected from Firebase. Switched to Local Mode.', false);
+      showToast('Disconnected Firebase. Switched to Local Mode.', '💾');
+    }
+
+    // ==================== DYNAMIC SLIDE STAGE RENDERING ====================
+    function createCustomSlideElement(slide) {
+      const colorMap = {
+        blue: { badge: 'bg-blue-50 border-blue-200 text-blue-700', border: 'border-l-blue-600', text: 'text-blue-600' },
+        indigo: { badge: 'bg-indigo-50 border-indigo-200 text-indigo-700', border: 'border-l-indigo-600', text: 'text-indigo-600' },
+        emerald: { badge: 'bg-emerald-50 border-emerald-200 text-emerald-800', border: 'border-l-emerald-600', text: 'text-emerald-700' },
+        amber: { badge: 'bg-amber-50 border-amber-300 text-amber-800', border: 'border-l-amber-500', text: 'text-amber-700' },
+        rose: { badge: 'bg-rose-50 border-rose-200 text-rose-700', border: 'border-l-rose-500', text: 'text-rose-600' }
+      };
+      const c = colorMap[slide.color] || colorMap.blue;
+      const lines = (slide.body || '').split('\n').map(l => l.trim()).filter(Boolean);
+
+      const sec = document.createElement('section');
+      sec.className = 'slide-container flex-col justify-center min-h-[74vh]';
+      sec.setAttribute('data-slide-id', slide.id);
+      sec.setAttribute('data-segment', slide.segment || 'Custom Slide');
+
+      sec.innerHTML = `
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <span class="px-3 py-1 rounded-lg border text-xs font-bold uppercase ${c.badge}">${escapeHtml(slide.segment || 'Custom Slide')}</span>
+          <button onclick="openSlideEditorModal('${slide.id}')" class="px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-300">✏️ Edit Slide</button>
+        </div>
+        <h2 class="text-4xl sm:text-5xl lg:text-6xl font-black text-slate-900 mb-4 leading-tight font-ml">${escapeHtml(slide.title)}</h2>
+        ${slide.subtitle ? `<p class="font-ml text-xl sm:text-2xl font-bold ${c.text} mb-6">${escapeHtml(slide.subtitle)}</p>` : ''}
+        ${lines.length ? `
+          <div class="minimal-card rounded-3xl p-6 sm:p-8 border-l-4 ${c.border}">
+            <ul class="space-y-3.5 font-ml text-lg sm:text-2xl text-slate-800">
+              ${lines.map(pt => `<li class="flex items-start gap-3"><span class="${c.text} font-black">•</span><span>${escapeHtml(pt)}</span></li>`).join('')}
+            </ul>
+          </div>
+        ` : ''}
+      `;
+      return sec;
+    }
+
+    function rebuildStageDOM() {
+      const stage = document.getElementById('slidesStage');
+      const existingMap = {};
+      stage.querySelectorAll('section.slide-container').forEach(sec => {
+        const id = sec.getAttribute('data-slide-id');
+        if (id && id.startsWith('builtin-')) existingMap[id] = sec;
+        else sec.remove();
+      });
+
+      appState.order = appState.order.filter(id => existingMap[id] || appState.customSlides[id]);
+      if (appState.order.length === 0) appState.order = [...DEFAULT_BUILTIN_ORDER];
+
+      appState.order.forEach(id => {
+        let secEl = existingMap[id];
+        if (!secEl && appState.customSlides[id]) {
+          secEl = createCustomSlideElement(appState.customSlides[id]);
+        }
+        if (secEl) {
+          stage.appendChild(secEl);
+          renderSlideFeatureImage(secEl, id);
+        }
+      });
+
+      if (currentSlideIndex >= appState.order.length) currentSlideIndex = appState.order.length - 1;
+    }
+
+    function renderSlideFeatureImage(secEl, slideId) {
+      const existingBanner = secEl.querySelector('.slide-feature-media-box');
+      if (existingBanner) existingBanner.remove();
+
+      const media = appState.slideMedia[slideId];
+      const imgSrc = media && media.featureImage ? resolveImageUrl(media.featureImage) : '';
+      if (imgSrc) {
+        const box = document.createElement('div');
+        box.className = 'slide-feature-media-box mt-6 w-full max-w-3xl mx-auto rounded-3xl overflow-hidden border border-slate-200 bg-white shadow-md';
+        box.innerHTML = `
+          <img src="${imgSrc}" alt="${escapeHtml(media.featureCaption || 'Concerned Slide Visual')}" class="w-full max-h-72 object-cover" />
+          ${media.featureCaption ? `<div class="px-4 py-2 text-xs sm:text-sm font-bold text-slate-700 bg-slate-50 border-t border-slate-200 text-center font-ml">${escapeHtml(media.featureCaption)}</div>` : ''}
+        `;
+        secEl.appendChild(box);
+      }
+    }
+
+    function getSlideTitleById(slideId) {
+      if (builtinNotesMap[slideId]) return builtinNotesMap[slideId].title;
+      if (appState.customSlides[slideId]) return appState.customSlides[slideId].title || 'Untitled Custom Slide';
+      return slideId;
+    }
+
+    function updateSlideUI() {
+      const total = appState.order.length;
+      const activeId = appState.order[currentSlideIndex];
+      const allSections = document.querySelectorAll('#slidesStage > section.slide-container');
+
+      allSections.forEach(sec => {
+        if (sec.getAttribute('data-slide-id') === activeId) sec.classList.add('active');
+        else sec.classList.remove('active');
+      });
+
+      const bgLayer = document.getElementById('slideBgLayer');
+      const media = appState.slideMedia[activeId];
+      const bgUrl = media && media.bgImage ? resolveImageUrl(media.bgImage) : '';
+      if (bgUrl) {
+        bgLayer.style.backgroundImage = `url('${bgUrl}')`;
+        bgLayer.style.opacity = ((media.bgOpacity || 16) / 100).toString();
+      } else {
+        bgLayer.style.backgroundImage = 'none';
+        bgLayer.style.opacity = '0';
+      }
+
+      document.getElementById('slideCounter').textContent = `${currentSlideIndex + 1} / ${total}`;
+      document.getElementById('progressBar').style.width = `${((currentSlideIndex + 1) / total) * 100}%`;
+
+      const activeSec = document.querySelector(`section[data-slide-id="${activeId}"]`);
+      document.getElementById('headerSegmentLabel').textContent = activeSec ? (activeSec.getAttribute('data-segment') || '') : '';
+
+      document.getElementById('prevBtn').disabled = currentSlideIndex === 0;
+      document.getElementById('nextBtn').disabled = currentSlideIndex === total - 1;
+
+      let noteObj = builtinNotesMap[activeId];
+      if (!noteObj && appState.customSlides[activeId]) {
+        const cs = appState.customSlides[activeId];
+        noteObj = {
+          title: cs.title,
+          action: cs.action || 'Custom slide — speak clearly and engage audience.',
+          script: cs.script || 'No speaker script added yet. Click Edit Slide to add notes.'
+        };
+      }
+      if (noteObj) {
+        document.getElementById('notesSlideTitle').textContent = `Slide ${currentSlideIndex + 1}: ${noteObj.title}`;
+        document.getElementById('speakerNotesContent').innerHTML = `
+          <div class="p-4 rounded-2xl bg-amber-50 border border-amber-200">
+            <div class="text-xs font-bold uppercase text-amber-800 mb-1">🎬 Stage Direction / Action</div>
+            <div class="text-sm text-amber-950 font-medium">${escapeHtml(noteObj.action)}</div>
+          </div>
+          <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+            <div class="text-xs font-bold uppercase text-blue-700 mb-2">🗣️ Stage Script &amp; Key Prompts</div>
+            <p class="text-slate-900 leading-relaxed">${escapeHtml(noteObj.script)}</p>
+          </div>
+        `;
+      }
+
+      document.getElementById('slidesViewport').scrollTop = 0;
+    }
+
+    function changeSlide(delta) {
+      const next = currentSlideIndex + delta;
+      if (next >= 0 && next < appState.order.length) {
+        currentSlideIndex = next;
+        updateSlideUI();
+      }
+    }
+
+    function goToSlideIndex(idx) {
+      if (idx >= 0 && idx < appState.order.length) {
+        currentSlideIndex = idx;
+        updateSlideUI();
+        document.getElementById('overviewModal').classList.add('hidden');
+      }
+    }
+
+    // ==================== MANAGE & REORDER SLIDES ====================
+    let dragSourceIndex = null;
+
+    function toggleOverviewModal() {
+      const modal = document.getElementById('overviewModal');
+      modal.classList.toggle('hidden');
+      if (!modal.classList.contains('hidden')) renderOverviewGrid();
+    }
+
+    function renderOverviewGrid() {
+      const grid = document.getElementById('overviewGrid');
+      grid.innerHTML = appState.order.map((slideId, idx) => {
+        const isCurrent = idx === currentSlideIndex;
+        const isCustom = slideId.startsWith('custom-');
+        const title = getSlideTitleById(slideId);
+        const media = appState.slideMedia[slideId] || {};
+        const hasImg = !!(media.featureImage || media.bgImage);
+
+        return `
+          <div draggable="true"
+               data-idx="${idx}"
+               ondragstart="handleDragStart(event, ${idx})"
+               ondragover="handleDragOver(event)"
+               ondragleave="handleDragLeave(event)"
+               ondrop="handleDrop(event, ${idx})"
+               class="flex flex-col justify-between p-4 rounded-2xl border transition cursor-grab active:cursor-grabbing ${isCurrent ? 'bg-blue-50 border-blue-500 shadow-sm' : 'bg-white border-slate-200 hover:border-slate-400'}">
+            <div>
+              <div class="flex items-center justify-between gap-1 mb-2">
+                <span class="text-xs font-black px-2 py-0.5 rounded bg-slate-100 text-blue-700">#${idx + 1}</span>
+                <div class="flex items-center gap-1">
+                  ${isCustom ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">CUSTOM</span>' : ''}
+                  ${hasImg ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700" title="Has Attached Image">🖼️</span>' : ''}
+                </div>
+              </div>
+              <button onclick="goToSlideIndex(${idx})" class="text-left font-bold text-sm text-slate-900 hover:text-blue-600 line-clamp-2 w-full mb-3 font-ml">
+                ${escapeHtml(title)}
+              </button>
+            </div>
+            <div class="pt-2.5 border-t border-slate-100 flex items-center justify-between gap-1">
+              <div class="flex items-center gap-1">
+                <button onclick="moveSlideOrder(${idx}, -1)" ${idx === 0 ? 'disabled' : ''} title="Move Earlier" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-30 text-xs font-black text-slate-700">▲</button>
+                <button onclick="moveSlideOrder(${idx}, 1)" ${idx === appState.order.length - 1 ? 'disabled' : ''} title="Move Later" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-30 text-xs font-black text-slate-700">▼</button>
+              </div>
+              <div class="flex items-center gap-1">
+                <button onclick="openImageManagerForSlide('${slideId}')" title="Add/Edit Image" class="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold">🖼️</button>
+                ${isCustom ? `<button onclick="openSlideEditorModal('${slideId}')" title="Edit Slide" class="px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold">✏️</button>` : ''}
+                ${isCustom ? `<button onclick="deleteCustomSlide('${slideId}')" title="Delete Slide" class="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold">🗑</button>` : ''}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function handleDragStart(e, idx) { dragSourceIndex = idx; e.dataTransfer.effectAllowed = 'move'; }
+    function handleDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over-card'); }
+    function handleDragLeave(e) { e.currentTarget.classList.remove('drag-over-card'); }
+    function handleDrop(e, targetIdx) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('drag-over-card');
+      if (dragSourceIndex === null || dragSourceIndex === targetIdx) return;
+      const movedId = appState.order.splice(dragSourceIndex, 1)[0];
+      appState.order.splice(targetIdx, 0, movedId);
+      dragSourceIndex = null;
+      rebuildStageDOM();
+      renderOverviewGrid();
+      updateSlideUI();
+    }
+
+    function moveSlideOrder(idx, direction) {
+      const targetIdx = idx + direction;
+      if (targetIdx < 0 || targetIdx >= appState.order.length) return;
+      const temp = appState.order[idx];
+      appState.order[idx] = appState.order[targetIdx];
+      appState.order[targetIdx] = temp;
+      rebuildStageDOM();
+      renderOverviewGrid();
+      updateSlideUI();
+    }
+
+    async function saveOrderNow() { await persistState('Slide Order Saved'); }
+
+    async function resetDefaultOrder() {
+      const customIds = Object.keys(appState.customSlides);
+      appState.order = [...DEFAULT_BUILTIN_ORDER, ...customIds];
+      currentSlideIndex = 0;
+      rebuildStageDOM();
+      renderOverviewGrid();
+      updateSlideUI();
+      await persistState('Default Order Restored');
+    }
+
+    // ==================== ADD / EDIT / DELETE CUSTOM SLIDES ====================
+    function openSlideEditorModal(existingId = '') {
+      document.getElementById('editSlideId').value = existingId;
+      editorDraftImage = null;
+
+      if (existingId && appState.customSlides[existingId]) {
+        const s = appState.customSlides[existingId];
+        document.getElementById('editorModalHeading').textContent = '✏️ Edit Custom Slide';
+        document.getElementById('editSlideSegment').value = s.segment || '';
+        document.getElementById('editSlideColor').value = s.color || 'blue';
+        document.getElementById('editSlideTitle').value = s.title || '';
+        document.getElementById('editSlideSubtitle').value = s.subtitle || '';
+        document.getElementById('editSlideBody').value = s.body || '';
+        document.getElementById('editSlideAction').value = s.action || '';
+        document.getElementById('editSlideScript').value = s.script || '';
+        const existingMedia = appState.slideMedia[existingId];
+        if (existingMedia && existingMedia.featureImage) {
+          editorDraftImage = { url: existingMedia.featureImage, caption: existingMedia.featureCaption || '' };
+        }
+      } else {
+        document.getElementById('editorModalHeading').textContent = '＋ Add New Slide';
+        document.getElementById('editSlideSegment').value = 'Custom Segment';
+        document.getElementById('editSlideColor').value = 'blue';
+        document.getElementById('editSlideTitle').value = '';
+        document.getElementById('editSlideSubtitle').value = '';
+        document.getElementById('editSlideBody').value = '';
+        document.getElementById('editSlideAction').value = '';
+        document.getElementById('editSlideScript').value = '';
+      }
+      refreshEditorDraftImageUI();
+      document.getElementById('slideEditorModal').classList.remove('hidden');
+    }
+
+    function closeSlideEditorModal() { document.getElementById('slideEditorModal').classList.add('hidden'); }
+
+    function refreshEditorDraftImageUI() {
+      const status = document.getElementById('editorImageStatus');
+      const rmBtn = document.getElementById('editorRemoveImgBtn');
+      if (editorDraftImage && editorDraftImage.url) {
+        status.textContent = `✅ Image attached ${editorDraftImage.caption ? '(' + editorDraftImage.caption + ')' : ''}`;
+        status.className = 'text-xs font-bold text-emerald-700';
+        rmBtn.classList.remove('hidden');
+      } else {
+        status.textContent = 'No image attached yet';
+        status.className = 'text-xs text-slate-500';
+        rmBtn.classList.add('hidden');
+      }
+    }
+
+    function clearEditorDraftImage() { editorDraftImage = null; refreshEditorDraftImageUI(); }
+
+    async function saveCustomSlide() {
+      const title = document.getElementById('editSlideTitle').value.trim();
+      if (!title) { showToast('Please enter a Main Headline for the slide!', '⚠️'); return; }
+      let id = document.getElementById('editSlideId').value;
+      const isNew = !id;
+      if (isNew) id = `custom-${Date.now()}`;
+
+      appState.customSlides[id] = {
+        id,
+        segment: document.getElementById('editSlideSegment').value.trim() || 'Custom Slide',
+        color: document.getElementById('editSlideColor').value,
+        title,
+        subtitle: document.getElementById('editSlideSubtitle').value.trim(),
+        body: document.getElementById('editSlideBody').value.trim(),
+        action: document.getElementById('editSlideAction').value.trim(),
+        script: document.getElementById('editSlideScript').value.trim()
+      };
+
+      if (editorDraftImage && editorDraftImage.url) {
+        appState.slideMedia[id] = {
+          ...(appState.slideMedia[id] || {}),
+          featureImage: editorDraftImage.url,
+          featureCaption: editorDraftImage.caption || ''
+        };
+      } else if (!isNew && appState.slideMedia[id]) {
+        delete appState.slideMedia[id].featureImage;
+      }
+
+      if (isNew) {
+        appState.order.splice(currentSlideIndex + 1, 0, id);
+        currentSlideIndex = currentSlideIndex + 1;
+      }
+
+      rebuildStageDOM();
+      updateSlideUI();
+      if (!document.getElementById('overviewModal').classList.contains('hidden')) renderOverviewGrid();
+      closeSlideEditorModal();
+      await persistState(isNew ? 'New Slide Added & Saved' : 'Slide Updated');
+    }
+
+    async function deleteCustomSlide(id) {
+      if (!confirm('Delete this custom slide permanently?')) return;
+      delete appState.customSlides[id];
+      delete appState.slideMedia[id];
+      appState.order = appState.order.filter(item => item !== id);
+      rebuildStageDOM();
+      renderOverviewGrid();
+      updateSlideUI();
+      await persistState('Custom Slide Deleted');
+    }
+
+    // ==================== UNIVERSAL IMAGE UPLOADER ====================
+    function openImageManagerForCurrentSlide() {
+      openImageManagerForSlide(appState.order[currentSlideIndex]);
+    }
+
+    function openImageManagerForSlide(slideId) {
+      imageUploadTargetMode = 'slide';
+      imageUploadTargetSlideId = slideId;
+      document.getElementById('imgPlacementBar').classList.remove('hidden');
+      document.getElementById('imgModalTargetLabel').textContent = `Target: ${getSlideTitleById(slideId)}`;
+
+      const media = appState.slideMedia[slideId] || {};
+      document.getElementById('removeCurrentFeatureBtn').classList.toggle('hidden', !media.featureImage);
+      document.getElementById('removeCurrentBgBtn').classList.toggle('hidden', !media.bgImage);
+      document.getElementById('bgOpacitySlider').value = media.bgOpacity || 16;
+      document.getElementById('bgOpacityValue').textContent = `${media.bgOpacity || 16}%`;
+
+      resetImageModalState();
+      document.getElementById('imageUploadModal').classList.remove('hidden');
+    }
+
+    function openImageUploaderForEditor() {
+      imageUploadTargetMode = 'editor';
+      imageUploadTargetSlideId = null;
+      document.getElementById('imgPlacementBar').classList.add('hidden');
+      document.getElementById('removeCurrentFeatureBtn').classList.add('hidden');
+      document.getElementById('removeCurrentBgBtn').classList.add('hidden');
+      document.getElementById('imgModalTargetLabel').textContent = 'Target: New / Editing Custom Slide';
+      resetImageModalState();
+      document.getElementById('imageUploadModal').classList.remove('hidden');
+    }
+
+    function resetImageModalState() {
+      clearPendingImage();
+      switchImageTab('files');
+      renderSavedAndSuggestedGallery();
+    }
+
+    function closeImageUploadModal() {
+      stopLiveCamera();
+      document.getElementById('imageUploadModal').classList.add('hidden');
+    }
+
+    function toggleBgOpacityControl() {
+      const val = document.querySelector('input[name="imgPlacement"]:checked').value;
+      document.getElementById('bgOpacityControl').classList.toggle('hidden', val !== 'background');
+    }
+
+    document.getElementById('bgOpacitySlider').addEventListener('input', (e) => {
+      document.getElementById('bgOpacityValue').textContent = `${e.target.value}%`;
+    });
+
+    function switchImageTab(tabName) {
+      if (tabName !== 'camera') stopLiveCamera();
+      document.querySelectorAll('.img-tab-panel').forEach(p => p.classList.add('hidden'));
+      document.getElementById(`tabPanel-${tabName}`).classList.remove('hidden');
+      document.querySelectorAll('.img-tab-btn').forEach(b => {
+        b.classList.remove('border-blue-600', 'text-blue-700', 'bg-blue-50/60');
+        b.classList.add('border-transparent', 'text-slate-600');
+      });
+      const activeBtn = document.getElementById(`tabBtn-${tabName}`);
+      activeBtn.classList.add('border-blue-600', 'text-blue-700', 'bg-blue-50/60');
+      activeBtn.classList.remove('border-transparent', 'text-slate-600');
+      if (tabName === 'gallery') renderSavedAndSuggestedGallery();
+    }
+
+    // Drag & drop support on file dropzone
+    const dropZone = document.getElementById('fileDropZone');
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-blue-500', 'bg-blue-50'); });
+    dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('border-blue-500', 'bg-blue-50'); });
+    dropZone.addEventListener('drop', async e => {
+      e.preventDefault();
+      dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith('image/')) {
+        const { dataUrl, blob } = await compressImageFile(file);
+        setPendingImage(dataUrl, blob, 'files', file.name.replace(/\.[^/.]+$/, ''));
+      }
+    });
+
+    function compressImageFile(fileOrBlob, maxDim = 1024, quality = 0.75) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const img = new Image();
+          img.onload = () => {
+            let w = img.width, h = img.height;
+            if (w > maxDim || h > maxDim) {
+              if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+              else { w = Math.round((w * maxDim) / h); h = maxDim; }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            const dataUrl = canvas.toDataURL('image/jpeg', quality);
+            canvas.toBlob(blob => resolve({ dataUrl, blob }), 'image/jpeg', quality);
+          };
+          img.onerror = reject;
+          img.src = ev.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(fileOrBlob);
+      });
+    }
+
+    async function handleFileUploadInput(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      try {
+        const { dataUrl, blob } = await compressImageFile(file);
+        setPendingImage(dataUrl, blob, 'files', file.name.replace(/\.[^/.]+$/, ''));
+      } catch (e) {
+        showToast('Could not read image file.', '❌');
+      }
+      event.target.value = '';
+    }
+
+    // LIVE CAMERA
+    async function startLiveCamera() {
+      stopLiveCamera();
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showToast('Live camera not supported here. Use Mobile Native Camera button!', '⚠️');
+        return;
+      }
+      try {
+        activeCameraStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: cameraFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
+        });
+        const video = document.getElementById('cameraVideo');
+        video.srcObject = activeCameraStream;
+        video.classList.remove('hidden');
+        document.getElementById('cameraPlaceholder').classList.add('hidden');
+        document.getElementById('captureCamBtn').classList.remove('hidden');
+        document.getElementById('flipCamBtn').classList.remove('hidden');
+        document.getElementById('startCamBtn').textContent = '⏹ Stop Camera';
+        document.getElementById('startCamBtn').onclick = stopLiveCamera;
+      } catch (err) {
+        showToast('Camera permission denied or unavailable. Try Mobile Native Camera!', '⚠️');
+      }
+    }
+
+    function stopLiveCamera() {
+      if (activeCameraStream) {
+        activeCameraStream.getTracks().forEach(t => t.stop());
+        activeCameraStream = null;
+      }
+      const video = document.getElementById('cameraVideo');
+      if (video) { video.srcObject = null; video.classList.add('hidden'); }
+      document.getElementById('cameraPlaceholder')?.classList.remove('hidden');
+      document.getElementById('captureCamBtn')?.classList.add('hidden');
+      document.getElementById('flipCamBtn')?.classList.add('hidden');
+      const startBtn = document.getElementById('startCamBtn');
+      if (startBtn) { startBtn.textContent = '▶ Start Live Camera'; startBtn.onclick = startLiveCamera; }
+    }
+
+    function flipCameraFacing() {
+      cameraFacingMode = cameraFacingMode === 'environment' ? 'user' : 'environment';
+      startLiveCamera();
+    }
+
+    function captureCameraPhoto() {
+      const video = document.getElementById('cameraVideo');
+      const canvas = document.getElementById('cameraCanvas');
+      if (!video.videoWidth) return;
+      const scale = Math.min(1, 1024 / Math.max(video.videoWidth, video.videoHeight));
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
+      canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
+      canvas.toBlob(blob => {
+        setPendingImage(dataUrl, blob, 'camera', 'Camera Snapshot');
+        stopLiveCamera();
+        showToast('Photo captured! Click Save Image to apply.', '📸');
+      }, 'image/jpeg', 0.78);
+    }
+
+    // GOOGLE DRIVE
+    function convertGoogleDriveUrl(url) {
+      const trimmed = url.trim();
+      const matchFile = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+      const matchId = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+      const fileId = matchFile ? matchFile[1] : (matchId ? matchId[1] : null);
+      if (fileId) return `https://lh3.googleusercontent.com/d/${fileId}=w1600`;
+      return trimmed;
+    }
+
+    function applyDriveOrUrlInput() {
+      const raw = document.getElementById('driveUrlInput').value.trim();
+      if (!raw) { showToast('Paste a Google Drive or Image URL first.', '⚠️'); return; }
+      setPendingImage(convertGoogleDriveUrl(raw), null, 'drive', 'Google Drive Image');
+      showToast('Drive / Image link loaded! Verify preview below.', '☁️');
+    }
+
+    // GALLERY
+    function renderSavedAndSuggestedGallery() {
+      const savedEl = document.getElementById('savedGalleryGrid');
+      if (appState.savedImages.length === 0) {
+        savedEl.innerHTML = `<div class="col-span-full text-xs text-slate-500 p-4 rounded-xl bg-slate-50 border border-slate-200 text-center">No uploaded images saved yet. Upload via Files, Camera, or Drive!</div>`;
+      } else {
+        savedEl.innerHTML = appState.savedImages.map((img, i) => {
+          const thumbSrc = resolveImageUrl(img.url);
+          return `
+            <button onclick="selectGalleryImage(${i})" class="group text-left rounded-xl overflow-hidden border border-slate-200 hover:border-blue-500 bg-white shadow-sm transition">
+              <img src="${thumbSrc}" alt="${escapeHtml(img.caption)}" class="w-full h-24 object-cover group-hover:scale-105 transition" />
+              <div class="p-2 text-[11px] font-bold text-slate-700 truncate">${escapeHtml(img.caption || 'Saved Image')}</div>
+            </button>
+          `;
+        }).join('');
+      }
+
+      const sugEl = document.getElementById('suggestedGalleryGrid');
+      sugEl.innerHTML = CURATED_SUGGESTIONS.map((s, i) => `
+        <button onclick="selectSuggestedImage(${i})" class="group text-left rounded-xl overflow-hidden border border-slate-200 hover:border-blue-500 bg-white shadow-sm transition">
+          <img src="${s.url}" alt="${s.label}" class="w-full h-24 object-cover group-hover:scale-105 transition" />
+          <div class="p-2 text-[11px] font-bold text-slate-700 truncate">${s.label}</div>
+        </button>
+      `).join('');
+    }
+
+    function selectGalleryImage(idx) {
+      const img = appState.savedImages[idx];
+      if (img) setPendingImage(img.url, null, 'gallery', img.caption || '');
+    }
+
+    function selectSuggestedImage(idx) {
+      const s = CURATED_SUGGESTIONS[idx];
+      if (s) setPendingImage(s.url, null, 'suggested', s.label);
+    }
+
+    function setPendingImage(urlOrRef, blob, source, defaultCaption = '') {
+      pendingImageDataUrlOrUrl = urlOrRef;
+      pendingImageBlob = blob;
+      pendingImageSource = source;
+      document.getElementById('pendingPreviewImg').src = resolveImageUrl(urlOrRef);
+      document.getElementById('pendingImgCaption').value = defaultCaption;
+      document.getElementById('pendingImagePreviewBox').classList.remove('hidden');
+      document.getElementById('uploadProgressMsg').textContent = isFirebaseConnected
+        ? 'Will save directly to Firebase Firestore Cloud ☁️'
+        : 'Ready to save locally (connect Firebase to sync across devices).';
+    }
+
+    function clearPendingImage() {
+      pendingImageDataUrlOrUrl = null;
+      pendingImageBlob = null;
+      document.getElementById('pendingImagePreviewBox').classList.add('hidden');
+      document.getElementById('driveUrlInput').value = '';
+    }
+
+    // FAST, ZERO-FREEZE FIRESTORE IMAGE SAVE
+    async function confirmApplyAndSaveImage() {
+      if (!pendingImageDataUrlOrUrl) {
+        showToast('Please upload, capture, or select an image first!', '⚠️');
+        return;
+      }
+
+      const btn = document.getElementById('confirmSaveImageBtn');
+      const statusMsg = document.getElementById('uploadProgressMsg');
+      btn.disabled = true;
+      btn.textContent = '⏳ Saving...';
+
+      try {
+        let finalImageRef = pendingImageDataUrlOrUrl;
+        const caption = document.getElementById('pendingImgCaption').value.trim();
+
+        // Save directly into Firestore images subcollection (100% Free Spark Plan, zero Storage freeze!)
+        if (isFirebaseConnected && fbDb && typeof finalImageRef === 'string' && finalImageRef.startsWith('data:image/')) {
+          if (statusMsg) statusMsg.textContent = '☁️ Uploading image to Firestore...';
+
+          if (finalImageRef.length > 900000 && pendingImageBlob) {
+            const smaller = await compressImageFile(pendingImageBlob, 800, 0.6);
+            finalImageRef = smaller.dataUrl;
+          }
+
+          const imgId = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          await withTimeout(
+            fbDb.collection('presentations').doc('screen-to-seen')
+              .collection('images').doc(imgId).set({
+                dataUrl: finalImageRef,
+                caption: caption || 'Concerned Slide Visual',
+                source: pendingImageSource,
+                createdAt: Date.now()
+              }),
+            12000,
+            'Firestore image upload'
+          );
+
+          firestoreImageCache[imgId] = finalImageRef;
+          finalImageRef = `fsimg:${imgId}`;
+        }
+
+        if (!appState.savedImages.some(img => img.url === finalImageRef)) {
+          appState.savedImages.unshift({
+            url: finalImageRef,
+            caption: caption || 'Concerned Slide Visual',
+            source: pendingImageSource,
+            createdAt: Date.now()
+          });
+        }
+
+        if (imageUploadTargetMode === 'editor') {
+          editorDraftImage = { url: finalImageRef, caption };
+          refreshEditorDraftImageUI();
+          closeImageUploadModal();
+          showToast('Image attached to slide draft!');
+          return;
+        }
+
+        const placement = document.querySelector('input[name="imgPlacement"]:checked').value;
+        const slideId = imageUploadTargetSlideId;
+        appState.slideMedia[slideId] = appState.slideMedia[slideId] || {};
+
+        if (placement === 'background') {
+          appState.slideMedia[slideId].bgImage = finalImageRef;
+          appState.slideMedia[slideId].bgOpacity = parseInt(document.getElementById('bgOpacitySlider').value, 10) || 16;
+        } else {
+          appState.slideMedia[slideId].featureImage = finalImageRef;
+          appState.slideMedia[slideId].featureCaption = caption;
+        }
+
+        const secEl = document.querySelector(`section[data-slide-id="${slideId}"]`);
+        if (secEl) renderSlideFeatureImage(secEl, slideId);
+        updateSlideUI();
+        if (!document.getElementById('overviewModal').classList.contains('hidden')) renderOverviewGrid();
+
+        closeImageUploadModal();
+        await withTimeout(persistState('Concerned Image Saved'), 12000, 'Presentation sync');
+
+      } catch (err) {
+        console.error('Image Save Failed:', err);
+        showFbDiagnostic(`❌ Image Save Error:\n${err.code ? err.code + ': ' : ''}${err.message}`, true);
+        showToast(err.code || err.message || 'Save failed!', '❌');
+        if (statusMsg) statusMsg.textContent = `❌ Failed: ${err.code || err.message}`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '💾 Save Image to Slide & Cloud';
+      }
+    }
+
+    async function removeMediaFromSlide(type) {
+      const slideId = imageUploadTargetSlideId;
+      if (!slideId || !appState.slideMedia[slideId]) return;
+      if (type === 'feature') {
+        delete appState.slideMedia[slideId].featureImage;
+        delete appState.slideMedia[slideId].featureCaption;
+      } else {
+        delete appState.slideMedia[slideId].bgImage;
+      }
+      const secEl = document.querySelector(`section[data-slide-id="${slideId}"]`);
+      if (secEl) renderSlideFeatureImage(secEl, slideId);
+      updateSlideUI();
+      closeImageUploadModal();
+      await persistState('Slide Image Removed');
+    }
+
+    // ==================== KEYBOARD SHORTCUTS (INPUT-SAFE) ====================
+    document.addEventListener('keydown', (e) => {
+      const tag = document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      if (e.key === 'ArrowRight' || e.key === ' ') {
+        if (tag !== 'BUTTON') { e.preventDefault(); changeSlide(1); }
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault(); changeSlide(-1);
+      } else if (e.key.toLowerCase() === 'n') {
+        toggleSpeakerNotes();
+      } else if (e.key.toLowerCase() === 'g') {
+        toggleOverviewModal();
+      } else if (e.key.toLowerCase() === 'f') {
+        toggleFullscreen();
+      } else if (e.key === 'Escape') {
+        document.getElementById('overviewModal').classList.add('hidden');
+        closeSlideEditorModal();
+        closeImageUploadModal();
+        closeFirebaseModal();
+      }
+    });
+
+    function toggleSpeakerNotes() {
+      const drawer = document.getElementById('speakerNotesDrawer');
+      drawer.classList.toggle('hidden');
+      drawer.classList.toggle('flex');
+    }
+
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+      else document.exitFullscreen().catch(() => {});
+    }
+
+    // ==================== INTERACTIVE STAGE TOOLS ====================
+    function setupInteractiveSvg(svgId, groupId, counterId, maxLines) {
+      const svg = document.getElementById(svgId);
+      const group = document.getElementById(groupId);
+      const counter = document.getElementById(counterId);
+      let isDrawing = false, currentLine = null, lineCount = 0;
+
+      function getCoords(evt) {
+        const rect = svg.getBoundingClientRect();
+        const clientX = evt.touches ? evt.touches[0].clientX : evt.clientX;
+        const clientY = evt.touches ? evt.touches[0].clientY : evt.clientY;
+        const vb = svg.viewBox.baseVal;
+        return { x: ((clientX - rect.left) / rect.width) * vb.width, y: ((clientY - rect.top) / rect.height) * vb.height };
+      }
+      function startDraw(evt) {
+        if (lineCount >= maxLines) return;
+        evt.preventDefault(); isDrawing = true;
+        const pt = getCoords(evt);
+        currentLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        currentLine.setAttribute('x1', pt.x); currentLine.setAttribute('y1', pt.y);
+        currentLine.setAttribute('x2', pt.x); currentLine.setAttribute('y2', pt.y);
+        currentLine.setAttribute('stroke', '#2563eb'); currentLine.setAttribute('stroke-width', '5');
+        currentLine.setAttribute('stroke-linecap', 'round');
+        group.appendChild(currentLine);
+      }
+      function moveDraw(evt) {
+        if (!isDrawing || !currentLine) return;
+        evt.preventDefault();
+        const pt = getCoords(evt);
+        currentLine.setAttribute('x2', pt.x); currentLine.setAttribute('y2', pt.y);
+      }
+      function endDraw() {
+        if (!isDrawing) return;
+        isDrawing = false; lineCount++;
+        counter.textContent = `Lines Used: ${lineCount} / ${maxLines}`;
+        currentLine = null;
+      }
+      svg.addEventListener('mousedown', startDraw);
+      svg.addEventListener('mousemove', moveDraw);
+      window.addEventListener('mouseup', endDraw);
+      svg.addEventListener('touchstart', startDraw, { passive: false });
+      svg.addEventListener('touchmove', moveDraw, { passive: false });
+      window.addEventListener('touchend', endDraw);
+
+      return () => { group.innerHTML = ''; lineCount = 0; counter.textContent = `Lines Used: 0 / ${maxLines}`; };
+    }
+
+    const clearP1User = setupInteractiveSvg('svgPuzzle1', 'p1UserLines', 'puzzle1LineCounter', 3);
+    const clearP2User = setupInteractiveSvg('svgPuzzle2', 'p2UserLines', 'puzzle2LineCounter', 4);
+
+    // ==================== LIVE PEN-DRAWING ENGINE FOR PUZZLE 1 (3-LINE / 9-DOT) ====================
+    let p1AnimFrameId = null;
+    let p1AnimRunToken = 0;
+
+    // Exact mathematically verified continuous Z-path piercing all 9 physical dots (r=16)
+    const P1_SEGMENTS = [
+      {
+        lineId: 'p1-sol-1',
+        x1: 198, y1: 64, x2: 492.7, y2: 116,
+        color: '#2563eb',
+        duration: 1100,
+        turnBadgeId: 'p1Turn1Badge',
+        // Dots pierced in exact drawing order (t = 0..1 along line)
+        dots: [
+          { id: 'p1-dot-1', t: 0.115 }, // Top-left (pierces top edge)
+          { id: 'p1-dot-2', t: 0.346 }, // Top-center (pierces center)
+          { id: 'p1-dot-3', t: 0.577 }  // Top-right (pierces bottom edge)
+        ]
+      },
+      {
+        lineId: 'p1-sol-2',
+        x1: 492.7, y1: 116, x2: 107.3, y2: 184,
+        color: '#7c3aed',
+        duration: 1350,
+        turnBadgeId: 'p1Turn2Badge',
+        dots: [
+          { id: 'p1-dot-6', t: 0.324 }, // Middle-right (pierces top edge)
+          { id: 'p1-dot-5', t: 0.500 }, // Middle-center (pierces center)
+          { id: 'p1-dot-4', t: 0.676 }  // Middle-left (pierces bottom edge)
+        ]
+      },
+      {
+        lineId: 'p1-sol-3',
+        x1: 107.3, y1: 184, x2: 402, y2: 236,
+        color: '#059669',
+        duration: 1100,
+        turnBadgeId: null,
+        dots: [
+          { id: 'p1-dot-7', t: 0.423 }, // Bottom-left (pierces top edge)
+          { id: 'p1-dot-8', t: 0.654 }, // Bottom-center (pierces center)
+          { id: 'p1-dot-9', t: 0.885 }  // Bottom-right (pierces bottom edge)
+        ]
+      }
+    ];
+
+    function resetPuzzle1DotsAndLines() {
+      p1AnimRunToken++;
+      if (p1AnimFrameId) {
+        cancelAnimationFrame(p1AnimFrameId);
+        p1AnimFrameId = null;
+      }
+      // Reset all 9 dots to default dark slate
+      for (let i = 1; i <= 9; i++) {
+        const dot = document.getElementById(`p1-dot-${i}`);
+        if (dot) {
+          dot.setAttribute('fill', '#0f172a');
+          dot.setAttribute('stroke', '#334155');
+          dot.classList.remove('dot-connected');
+        }
+      }
+      // Hide & reset all 3 solution lines
+      P1_SEGMENTS.forEach(seg => {
+        const line = document.getElementById(seg.lineId);
+        if (line) {
+          line.classList.add('hidden');
+          line.setAttribute('x1', seg.x1);
+          line.setAttribute('y1', seg.y1);
+          line.setAttribute('x2', seg.x1);
+          line.setAttribute('y2', seg.y1);
+        }
+      });
+      document.getElementById('p1Turn1Badge')?.classList.add('hidden');
+      document.getElementById('p1Turn2Badge')?.classList.add('hidden');
+      document.getElementById('p1PenTip')?.classList.add('hidden');
+      const dotCounter = document.getElementById('puzzle1DotCounter');
+      if (dotCounter) dotCounter.textContent = 'Dots: 0 / 9';
+    }
+
+    function resetPuzzle1() {
+      clearP1User();
+      resetPuzzle1DotsAndLines();
+      document.getElementById('puzzle1LineCounter').textContent = 'Lines: 0 / 3';
+      document.getElementById('p1HintBanner').classList.add('hidden');
+      const btn = document.getElementById('revealP1Btn');
+      if (btn) btn.textContent = '✨ Reveal 3-Line Solution';
+    }
+
+    let p1PauseTimer = null;
+
+    function animateLineSegment(seg, segIndex, token, onDotHit, onComplete) {
+      const line = document.getElementById(seg.lineId);
+      const pen = document.getElementById('p1PenTip');
+      const halo = pen ? pen.querySelector('.pen-halo') : null;
+      const triggered = new Set();
+
+      line.classList.remove('hidden');
+      line.setAttribute('x1', seg.x1);
+      line.setAttribute('y1', seg.y1);
+      line.setAttribute('x2', seg.x1);
+      line.setAttribute('y2', seg.y1);
+
+      if (pen) {
+        pen.classList.remove('hidden');
+        if (halo) halo.setAttribute('fill', seg.color);
+      }
+      document.getElementById('puzzle1LineCounter').textContent = `Drawing Line ${segIndex + 1} / 3...`;
+
+      const startTime = performance.now();
+
+      function step(now) {
+        if (token !== p1AnimRunToken) return;
+        const rawT = Math.min((now - startTime) / seg.duration, 1);
+        // Smooth pen ease-in-out
+        const easedT = rawT < 0.5 ? 2 * rawT * rawT : 1 - Math.pow(-2 * rawT + 2, 2) / 2;
+
+        const curX = seg.x1 + (seg.x2 - seg.x1) * easedT;
+        const curY = seg.y1 + (seg.y2 - seg.y1) * easedT;
+
+        line.setAttribute('x2', curX);
+        line.setAttribute('y2', curY);
+        if (pen) pen.setAttribute('transform', `translate(${curX}, ${curY})`);
+
+        // Light up each dot the exact moment the pen touches it
+        seg.dots.forEach(d => {
+          if (easedT >= d.t && !triggered.has(d.id)) {
+            triggered.add(d.id);
+            const dotEl = document.getElementById(d.id);
+            if (dotEl) {
+              dotEl.setAttribute('fill', seg.color);
+              dotEl.setAttribute('stroke', '#ffffff');
+              dotEl.classList.add('dot-connected');
+            }
+            onDotHit();
+          }
+        });
+
+        if (rawT < 1) {
+          p1AnimFrameId = requestAnimationFrame(step);
+        } else {
+          if (seg.turnBadgeId) {
+            document.getElementById(seg.turnBadgeId)?.classList.remove('hidden');
+          }
+          onComplete();
+        }
+      }
+
+      p1AnimFrameId = requestAnimationFrame(step);
+    }
+
+    function revealPuzzle1() {
+      clearP1User();
+      resetPuzzle1DotsAndLines();
+      if (p1PauseTimer) {
+        clearTimeout(p1PauseTimer);
+        p1PauseTimer = null;
+      }
+
+      const myToken = p1AnimRunToken;
+      let connectedCount = 0;
+
+      const btn = document.getElementById('revealP1Btn');
+      if (btn) btn.textContent = '✍️ Drawing Live...';
+
+      const onDotHit = () => {
+        connectedCount++;
+        const counter = document.getElementById('puzzle1DotCounter');
+        if (counter) counter.textContent = `Dots: ${connectedCount} / 9`;
+      };
+
+      // Chains segments 0 -> 1 -> 2 with ZERO for-loops (100% preview-safe!)
+      function playNextSegment(index) {
+        if (myToken !== p1AnimRunToken) return;
+
+        if (index >= P1_SEGMENTS.length) {
+          document.getElementById('p1PenTip')?.classList.add('hidden');
+          document.getElementById('puzzle1LineCounter').textContent = 'Lines: 3 / 3 (Solved! 🎉)';
+          document.getElementById('p1HintBanner').classList.remove('hidden');
+          if (btn) btn.textContent = '🔁 Replay Drawing';
+          return;
+        }
+
+        animateLineSegment(P1_SEGMENTS[index], index, myToken, onDotHit, () => {
+          if (myToken !== p1AnimRunToken) return;
+          const pauseMs = index < P1_SEGMENTS.length - 1 ? 260 : 0;
+          p1PauseTimer = setTimeout(() => playNextSegment(index + 1), pauseMs);
+        });
+      }
+
+      playNextSegment(0);
+    }
+
+    // ==================== LIVE PEN-DRAWING ENGINE FOR PUZZLE 2 (4-LINE BOX-BREAK) ====================
+    let p2AnimFrameId = null;
+    let p2PauseTimer = null;
+    let p2AnimRunToken = 0;
+
+    // Exact continuous 4-line center-piercing Box-Break path (all 9 dots connected)
+    const P2_SEGMENTS = [
+      {
+        lineId: 'p2-sol-1',
+        x1: 140, y1: 65, x2: 140, y2: 290, // Down col 1 + overshoot outside bottom
+        color: '#2563eb',
+        duration: 950,
+        badgeId: 'p2Overshoot1Badge',
+        dots: [
+          { id: 'p2-dot-1', t: 0.01 },
+          { id: 'p2-dot-4', t: 0.333 },
+          { id: 'p2-dot-7', t: 0.667 }
+        ]
+      },
+      {
+        lineId: 'p2-sol-2',
+        x1: 140, y1: 290, x2: 365, y2: 65, // 45° diagonal up-right + overshoot outside right
+        color: '#d97706',
+        duration: 1150,
+        badgeId: 'p2Overshoot2Badge',
+        dots: [
+          { id: 'p2-dot-8', t: 0.333 },
+          { id: 'p2-dot-6', t: 0.667 }
+        ]
+      },
+      {
+        lineId: 'p2-sol-3',
+        x1: 365, y1: 65, x2: 140, y2: 65, // Straight left across top row back to Dot 1
+        color: '#059669',
+        duration: 950,
+        badgeId: null,
+        dots: [
+          { id: 'p2-dot-3', t: 0.333 },
+          { id: 'p2-dot-2', t: 0.667 }
+        ]
+      },
+      {
+        lineId: 'p2-sol-4',
+        x1: 140, y1: 65, x2: 290, y2: 215, // 45° diagonal down-right through center to Dot 9
+        color: '#7c3aed',
+        duration: 900,
+        badgeId: null,
+        dots: [
+          { id: 'p2-dot-5', t: 0.50 },
+          { id: 'p2-dot-9', t: 0.97 }
+        ]
+      }
+    ];
+
+    function resetPuzzle2DotsAndLines() {
+      p2AnimRunToken++;
+      if (p2AnimFrameId) {
+        cancelAnimationFrame(p2AnimFrameId);
+        p2AnimFrameId = null;
+      }
+      if (p2PauseTimer) {
+        clearTimeout(p2PauseTimer);
+        p2PauseTimer = null;
+      }
+
+      // Reset all 9 dots
+      for (let i = 1; i <= 9; i++) {
+        const dot = document.getElementById(`p2-dot-${i}`);
+        if (dot) {
+          dot.setAttribute('fill', '#0f172a');
+          dot.setAttribute('stroke', '#334155');
+          dot.classList.remove('dot-connected');
+        }
+      }
+
+      // Hide & reset all 4 lines
+      P2_SEGMENTS.forEach(seg => {
+        const line = document.getElementById(seg.lineId);
+        if (line) {
+          line.classList.add('hidden');
+          line.setAttribute('x1', seg.x1);
+          line.setAttribute('y1', seg.y1);
+          line.setAttribute('x2', seg.x1);
+          line.setAttribute('y2', seg.y1);
+        }
+      });
+
+      document.getElementById('p2Overshoot1Badge')?.classList.add('hidden');
+      document.getElementById('p2Overshoot2Badge')?.classList.add('hidden');
+      document.getElementById('p2PenTip')?.classList.add('hidden');
+      const dotCounter = document.getElementById('puzzle2DotCounter');
+      if (dotCounter) dotCounter.textContent = 'Dots: 0 / 9';
+    }
+
+    function resetPuzzle2() {
+      clearP2User();
+      resetPuzzle2DotsAndLines();
+      document.getElementById('puzzle2LineCounter').textContent = 'Lines: 0 / 4';
+      document.getElementById('p2SuccessBanner').classList.add('hidden');
+      const btn = document.getElementById('revealP2Btn');
+      if (btn) btn.textContent = '🚀 Reveal Box-Break Solution';
+    }
+
+    function animateP2LineSegment(seg, segIndex, token, hitDotSet, onDotHit, onComplete) {
+      const line = document.getElementById(seg.lineId);
+      const pen = document.getElementById('p2PenTip');
+      const halo = pen ? pen.querySelector('.pen-halo') : null;
+
+      line.classList.remove('hidden');
+      line.setAttribute('x1', seg.x1);
+      line.setAttribute('y1', seg.y1);
+      line.setAttribute('x2', seg.x1);
+      line.setAttribute('y2', seg.y1);
+
+      if (pen) {
+        pen.classList.remove('hidden');
+        if (halo) halo.setAttribute('fill', seg.color);
+      }
+      document.getElementById('puzzle2LineCounter').textContent = `Drawing Line ${segIndex + 1} / 4...`;
+
+      const startTime = performance.now();
+
+      function step(now) {
+        if (token !== p2AnimRunToken) return;
+        const rawT = Math.min((now - startTime) / seg.duration, 1);
+        const easedT = rawT < 0.5 ? 2 * rawT * rawT : 1 - Math.pow(-2 * rawT + 2, 2) / 2;
+
+        const curX = seg.x1 + (seg.x2 - seg.x1) * easedT;
+        const curY = seg.y1 + (seg.y2 - seg.y1) * easedT;
+
+        line.setAttribute('x2', curX);
+        line.setAttribute('y2', curY);
+        if (pen) pen.setAttribute('transform', `translate(${curX}, ${curY})`);
+
+        // Light up each dot the exact moment the pen passes its center
+        seg.dots.forEach(d => {
+          if (easedT >= d.t && !hitDotSet.has(d.id)) {
+            hitDotSet.add(d.id);
+            const dotEl = document.getElementById(d.id);
+            if (dotEl) {
+              dotEl.setAttribute('fill', seg.color);
+              dotEl.setAttribute('stroke', '#ffffff');
+              dotEl.classList.add('dot-connected');
+            }
+            onDotHit(hitDotSet.size);
+          }
+        });
+
+        if (rawT < 1) {
+          p2AnimFrameId = requestAnimationFrame(step);
+        } else {
+          if (seg.badgeId) {
+            document.getElementById(seg.badgeId)?.classList.remove('hidden');
+          }
+          onComplete();
+        }
+      }
+
+      p2AnimFrameId = requestAnimationFrame(step);
+    }
+
+    function revealPuzzle2() {
+      clearP2User();
+      resetPuzzle2DotsAndLines();
+      const myToken = p2AnimRunToken;
+      const hitDotSet = new Set();
+
+      const btn = document.getElementById('revealP2Btn');
+      if (btn) btn.textContent = '✍️ Breaking the Box...';
+
+      const onDotHit = (count) => {
+        const counter = document.getElementById('puzzle2DotCounter');
+        if (counter) counter.textContent = `Dots: ${count} / 9`;
+      };
+
+      // Chains all 4 segments smoothly with ZERO for-loops (100% preview-safe!)
+      function playNextP2Segment(index) {
+        if (myToken !== p2AnimRunToken) return;
+
+        if (index >= P2_SEGMENTS.length) {
+          document.getElementById('p2PenTip')?.classList.add('hidden');
+          document.getElementById('puzzle2LineCounter').textContent = 'Lines: 4 / 4 (Box Broken! 🚀)';
+          document.getElementById('p2SuccessBanner').classList.remove('hidden');
+          if (btn) btn.textContent = '🔁 Replay Box-Break';
+          return;
+        }
+
+        animateP2LineSegment(P2_SEGMENTS[index], index, myToken, hitDotSet, onDotHit, () => {
+          if (myToken !== p2AnimRunToken) return;
+          const pauseMs = index < P2_SEGMENTS.length - 1 ? 260 : 0;
+          p2PauseTimer = setTimeout(() => playNextP2Segment(index + 1), pauseMs);
+        });
+      }
+
+      playNextP2Segment(0);
+    }
+
+    function revealBatBall() {
+      document.getElementById('batBallAnswerBox').classList.remove('hidden');
+      document.getElementById('batBallRevealBtn').textContent = '✅ System 2 Answer Revealed';
+    }
+
+    const stroopWords = [
+      { text: 'നീല (BLUE)', color: '#dc2626' }, { text: 'ചുവപ്പ് (RED)', color: '#059669' },
+      { text: 'പച്ച (GREEN)', color: '#d97706' }, { text: 'മഞ്ഞ (YELLOW)', color: '#2563eb' },
+      { text: 'കറുപ്പ് (BLACK)', color: '#7c3aed' }, { text: 'നീല (BLUE)', color: '#059669' },
+      { text: 'മഞ്ഞ (YELLOW)', color: '#dc2626' }, { text: 'ചുവപ്പ് (RED)', color: '#2563eb' }
+    ];
+    function shuffleStroop() {
+      const grid = document.getElementById('stroopGrid');
+      const shuffled = [...stroopWords].sort(() => Math.random() - 0.5);
+      grid.innerHTML = shuffled.map(item => `
+        <div class="p-5 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-center shadow-sm">
+          <span class="font-ml text-2xl sm:text-3xl font-black tracking-wide" style="color: ${item.color};">${item.text}</span>
+        </div>
+      `).join('');
+    }
+
+    let swInterval = null, swStartTime = 0, swElapsed = 0, swRunning = false;
+    function toggleStopwatch() {
+      const btn = document.getElementById('swStartBtn');
+      if (!swRunning) {
+        swRunning = true; swStartTime = Date.now() - swElapsed;
+        btn.textContent = '⏸ Pause'; btn.classList.replace('bg-emerald-600', 'bg-amber-600');
+        swInterval = setInterval(() => {
+          swElapsed = Date.now() - swStartTime;
+          document.getElementById('stopwatchDisplay').textContent = (swElapsed / 1000).toFixed(1) + 's';
+        }, 100);
+      } else {
+        swRunning = false; clearInterval(swInterval);
+        btn.textContent = '▶ Resume'; btn.classList.replace('bg-amber-600', 'bg-emerald-600');
+      }
+    }
+    function recordRound(n) { document.getElementById(`r${n}Time`).textContent = (swElapsed / 1000).toFixed(1) + 's'; }
+    function resetStopwatch() {
+      swRunning = false; clearInterval(swInterval); swElapsed = 0;
+      document.getElementById('stopwatchDisplay').textContent = '00.0s';
+      const btn = document.getElementById('swStartBtn');
+      btn.textContent = '▶ Start Timer'; btn.classList.remove('bg-amber-600'); btn.classList.add('bg-emerald-600');
+    }
+
+    function toggleGrayscaleMode() {
+      document.body.classList.toggle('grayscale-demo');
+      const isGray = document.body.classList.contains('grayscale-demo');
+      document.getElementById('headerGrayscaleBadge').classList.toggle('hidden', !isGray);
+      const demoBtn = document.getElementById('grayscaleDemoBtn');
+      if (demoBtn) demoBtn.textContent = isGray ? '🌈 Restore Full Color Mode' : '⚫⚪ Test Grayscale Mode Live!';
+    }
+
+    // ==================== BOOTSTRAP STUDIO ====================
+    loadLocalState();
+    rebuildStageDOM();
+    shuffleStroop();
+    updateSlideUI();
+    initFirebaseFromSavedConfig();
+  </script>
+</body>
+</html>
