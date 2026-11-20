@@ -114,6 +114,39 @@
     .pen-halo {
       animation: penPulse 0.9s infinite ease-in-out;
     }
+
+    /* Auto-Hide Top Header & Bottom Footer Bars (Keynote / Projector Mode) */
+    .auto-hide-header {
+      position: fixed !important;
+      top: 0;
+      left: 0;
+      right: 0;
+      transform: translateY(-105%);
+      opacity: 0;
+      pointer-events: none;
+      transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
+    }
+    .auto-hide-header.bar-visible {
+      transform: translateY(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .auto-hide-footer {
+      position: fixed !important;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      transform: translateY(105%);
+      opacity: 0;
+      pointer-events: none;
+      transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
+    }
+    .auto-hide-footer.bar-visible {
+      transform: translateY(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
     
   </style>
 </head>
@@ -134,7 +167,7 @@
   </div>
 
   <!-- Top Stage Header Bar -->
-  <header class="w-full px-4 sm:px-6 pt-3.5 pb-2.5 flex flex-wrap items-center justify-between gap-2 z-40 border-b border-slate-200 bg-white/95 backdrop-blur-md shadow-sm relative">
+  <header id="stageHeader" class="auto-hide-header w-full px-4 sm:px-6 pt-3.5 pb-2.5 flex flex-wrap items-center justify-between gap-2 z-40 border-b border-slate-200 bg-white/95 backdrop-blur-md shadow-md">
     <div class="flex items-center gap-3">
       <span class="inline-flex items-center justify-center w-9 h-9 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 font-black text-sm">S2S</span>
       <div>
@@ -865,7 +898,7 @@
   </div>
 
   <!-- Bottom Navigation Controls Bar -->
-  <footer class="w-full px-4 sm:px-8 py-3 border-t border-slate-200 bg-white/95 backdrop-blur-md flex items-center justify-between z-40 shadow-sm relative">
+  <footer id="stageFooter" class="auto-hide-footer w-full px-4 sm:px-8 py-3 border-t border-slate-200 bg-white/95 backdrop-blur-md flex items-center justify-between z-40 shadow-md">
     <button id="prevBtn" onclick="changeSlide(-1)" class="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-800 font-bold text-xs sm:text-sm flex items-center gap-2 border border-slate-300 transition">
       <span>←</span> <span>Previous</span>
     </button>
@@ -2721,6 +2754,77 @@ service cloud.firestore {
       const demoBtn = document.getElementById('grayscaleDemoBtn');
       if (demoBtn) demoBtn.textContent = isGray ? '🌈 Restore Full Color Mode' : '⚫⚪ Test Grayscale Mode Live!';
     }
+
+    // ==================== AUTO-HIDE HEADER & FOOTER ON MOUSE EDGE TOUCH ====================
+    (function setupAutoHideBars() {
+      const header = document.getElementById('stageHeader');
+      const footer = document.getElementById('stageFooter');
+      if (!header || !footer) return;
+
+      let hideHeaderTimer = null;
+      let hideFooterTimer = null;
+      let isOverHeader = false;
+      let isOverFooter = false;
+
+      const TOP_TRIGGER_PX = 28;    // Touch top 28px edge to reveal Header
+      const BOTTOM_TRIGGER_PX = 36; // Touch bottom 36px edge to reveal Prev/Next Footer
+
+      function showHeader() {
+        clearTimeout(hideHeaderTimer);
+        header.classList.add('bar-visible');
+      }
+      function scheduleHideHeader() {
+        clearTimeout(hideHeaderTimer);
+        hideHeaderTimer = setTimeout(() => {
+          if (!isOverHeader) header.classList.remove('bar-visible');
+        }, 350);
+      }
+
+      function showFooter() {
+        clearTimeout(hideFooterTimer);
+        footer.classList.add('bar-visible');
+      }
+      function scheduleHideFooter() {
+        clearTimeout(hideFooterTimer);
+        hideFooterTimer = setTimeout(() => {
+          if (!isOverFooter) footer.classList.remove('bar-visible');
+        }, 350);
+      }
+
+      // Keep bars visible while cursor stays on them
+      header.addEventListener('mouseenter', () => { isOverHeader = true; showHeader(); });
+      header.addEventListener('mouseleave', () => { isOverHeader = false; scheduleHideHeader(); });
+
+      footer.addEventListener('mouseenter', () => { isOverFooter = true; showFooter(); });
+      footer.addEventListener('mouseleave', () => { isOverFooter = false; scheduleHideFooter(); });
+
+      // Detect mouse pointer touching top or bottom edges of the screen
+      document.addEventListener('mousemove', (e) => {
+        if (e.clientY <= TOP_TRIGGER_PX) {
+          showHeader();
+        } else if (!isOverHeader && e.clientY > header.offsetHeight + 16) {
+          scheduleHideHeader();
+        }
+
+        if (window.innerHeight - e.clientY <= BOTTOM_TRIGGER_PX) {
+          showFooter();
+        } else if (!isOverFooter && window.innerHeight - e.clientY > footer.offsetHeight + 16) {
+          scheduleHideFooter();
+        }
+      });
+
+      // Touch-screen support (tap top or bottom edge to peek bars for 3 seconds)
+      document.addEventListener('touchstart', (e) => {
+        const y = e.touches[0]?.clientY ?? 999;
+        if (y <= 40) {
+          showHeader();
+          hideHeaderTimer = setTimeout(() => header.classList.remove('bar-visible'), 3500);
+        } else if (window.innerHeight - y <= 50) {
+          showFooter();
+          hideFooterTimer = setTimeout(() => footer.classList.remove('bar-visible'), 3500);
+        }
+      }, { passive: true });
+    })();
 
     // ==================== BOOTSTRAP STUDIO ====================
     loadLocalState();
