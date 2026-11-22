@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
   <title>SCREEN TO SEEN — Dynamic Slide Studio (White Minimalist + Firebase)</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -1295,6 +1296,10 @@ service cloud.firestore {
         <!-- Play/Pause button (shown ONLY for clean YouTube video mode) -->
         <button id="stageYtPlayPauseBtn" onclick="toggleCleanYouTubePlayPause()" class="hidden px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs sm:text-sm border border-slate-700 transition">
           ⏸ Pause
+        </button>
+        <!-- Toggle bottom YouTube badge mask (Starts OPEN so Ad 1/1 & Skip Ad are 100% visible & clickable!) -->
+        <button id="stageYtMaskBtn" onclick="toggleYtBottomMask()" class="hidden px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm shadow transition">
+          📢 Ad/Skip Visible (Click to Hide Bottom)
         </button>
         <!-- Malayalam Translation Toggle (shown ONLY for Web Links) -->
         <button id="stageWebTranslateBtn" onclick="toggleWebLinkMalayalam()" class="hidden px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm shadow transition flex items-center gap-1.5 font-ml">
@@ -3058,10 +3063,26 @@ service cloud.firestore {
     // ==================== YOUTUBE VIDEO & IN-APP WEB LINK MANAGER ====================
     function extractYouTubeId(url) {
       const str = (url || '').trim();
-      const match = str.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/);
-      if (match) return match[1];
       if (/^[a-zA-Z0-9_-]{11}$/.test(str)) return str;
-      return null;
+      try {
+        const parsed = new URL(str.startsWith('http') ? str : 'https://' + str);
+        // Standard watch links: youtube.com/watch?v=ID or m.youtube.com/watch?list=...&v=ID
+        const vParam = parsed.searchParams.get('v');
+        if (vParam && /^[a-zA-Z0-9_-]{11}$/.test(vParam)) return vParam;
+        // Short links: youtu.be/ID
+        if (parsed.hostname.includes('youtu.be')) {
+          const id = parsed.pathname.split('/').filter(Boolean)[0];
+          if (id && /^[a-zA-Z0-9_-]{11}$/.test(id)) return id;
+        }
+        // Shorts / Embed / Live links: /shorts/ID, /embed/ID, /live/ID
+        const segs = parsed.pathname.split('/').filter(Boolean);
+        const idx = segs.findIndex(s => ['embed', 'shorts', 'live', 'v'].includes(s));
+        if (idx !== -1 && segs[idx + 1] && /^[a-zA-Z0-9_-]{11}$/.test(segs[idx + 1])) {
+          return segs[idx + 1];
+        }
+      } catch (_) {}
+      const fallback = str.match(/(?:[?&]v=|youtu\.be\/|\/embed\/|\/shorts\/|\/live\/)([a-zA-Z0-9_-]{11})/);
+      return fallback ? fallback[1] : null;
     }
 
     function openVideoLinkModal() {
@@ -3204,45 +3225,87 @@ service cloud.firestore {
       viewer.classList.remove('hidden');
     }
 
+    let ytBottomMasked = false;
+
     function openFullscreenYouTube(videoId, title) {
       const viewer = document.getElementById('stageMediaViewer');
       const body = document.getElementById('stageMediaBody');
       document.getElementById('stageMediaTitle').textContent = `🎬 ${title}`;
-      const ppBtn = document.getElementById('stageYtPlayPauseBtn');
       document.getElementById('stageWebTranslateBtn')?.classList.add('hidden');
       document.getElementById('stageWebExternalBtn')?.classList.add('hidden');
-      ppBtn.classList.remove('hidden');
-      ppBtn.textContent = '⏸ Pause';
+
+      const ppBtn = document.getElementById('stageYtPlayPauseBtn');
+      if (ppBtn) {
+        ppBtn.classList.remove('hidden');
+        ppBtn.textContent = '⏸ Pause';
+      }
+
+      // Start with bottom UNMASKED so "Ad 1/1" and "Skip Ad" are 100% visible & clickable
+      ytBottomMasked = false;
+      const maskBtn = document.getElementById('stageYtMaskBtn');
+      if (maskBtn) {
+        maskBtn.classList.remove('hidden');
+        maskBtn.textContent = '📢 Ad/Skip Visible (Hide Bottom)';
+        maskBtn.className = 'px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm shadow transition';
+      }
       ytIsPlaying = true;
 
-      // Distraction-free embed: no controls, no playlist, no next/prev, no loop, no annotations
-      const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&fs=0&loop=0&playsinline=1&enablejsapi=1`;
+      // Build reliable YouTube embed URL (passes origin only on http/https so API never errors)
+      const isWebOrigin = window.location.protocol === 'http:' || window.location.protocol === 'https:';
+      const originParam = isWebOrigin ? `&origin=${encodeURIComponent(window.location.origin)}` : '';
+      const embedUrl = `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?autoplay=1&controls=0&rel=0&iv_load_policy=3&disablekb=1&fs=0&loop=0&playsinline=1&enablejsapi=1${originParam}`;
 
-      // Overscan top -85px & bottom -85px physically hides Author Profile, Title, Share, and "Watch on YouTube"
+      const localFileWarning = !isWebOrigin
+        ? `<div class="w-full px-4 py-1.5 bg-amber-950/90 border-b border-amber-700 text-amber-200 text-xs text-center z-30">
+             ⚠️ Running from <code>file://</code> — if YouTube shows Error 153, open via <strong>VS Code Live Server / localhost / Firebase Hosting</strong> (or <a href="https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}" target="_blank" rel="noopener" class="underline font-bold text-white">open video directly ↗</a>).
+           </div>`
+        : '';
+
       body.innerHTML = `
-        <div class="relative w-full h-full overflow-hidden bg-black flex items-center justify-center">
-          <iframe id="cleanYoutubeIframe"
-                  src="${embedUrl}"
-                  style="position: absolute; top: -85px; left: 0; width: 100%; height: calc(100% + 170px); border: 0;"
-                  allow="autoplay; encrypted-media"
-                  referrerpolicy="strict-origin-when-cross-origin"></iframe>
+        <div class="relative w-full h-full flex flex-col bg-black overflow-hidden">
+          ${localFileWarning}
+          <div class="relative flex-1 w-full overflow-hidden bg-black">
+            <!-- Exact YouTube Video Player (Full interactive access to Skip Ad!) -->
+            <iframe id="cleanYoutubeIframe"
+                    src="${embedUrl}"
+                    class="w-full h-full border-0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    referrerpolicy="strict-origin-when-cross-origin"></iframe>
 
-          <!-- Transparent Click-Shield blocks all YouTube hover/click overlays -->
-          <div onclick="toggleCleanYouTubePlayPause()"
-               title="Click to Play / Pause"
-               class="absolute inset-0 z-10 cursor-pointer bg-transparent"></div>
+            <!-- TOP MASK ONLY (62px): Permanently hides Author Profile, Channel Avatar, Video Title & Share -->
+            <div class="absolute top-0 left-0 right-0 h-[62px] bg-black z-10 pointer-events-auto"></div>
 
-          <!-- Clean Pause Curtain (hides YouTube's "More Videos" / Author / "Watch on YouTube" when paused) -->
-          <div id="ytPausedCurtain"
-               onclick="toggleCleanYouTubePlayPause()"
-               class="hidden absolute inset-0 z-20 bg-slate-950/85 backdrop-blur-sm flex flex-col items-center justify-center cursor-pointer select-none">
-            <div class="w-20 h-20 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center text-4xl shadow-2xl mb-4 transition">▶</div>
-            <div class="text-white font-black text-xl tracking-wide">Video Paused</div>
-            <div class="text-slate-300 text-sm font-semibold mt-1">Click anywhere to resume • Press ESC or Back to return</div>
+            <!-- BOTTOM MASK (Hidden initially so "Ad 1/1" & "Skip Ad" work! Toggleable in 1 click after skipping ad) -->
+            <div id="ytBottomBadgeMask" class="hidden absolute bottom-0 left-0 right-0 h-[52px] bg-black z-10 pointer-events-auto"></div>
+
+            <!-- Clean Pause Curtain (hides YouTube's pause screen "More Videos" & "Watch on YouTube") -->
+            <div id="ytPausedCurtain"
+                 onclick="toggleCleanYouTubePlayPause()"
+                 class="hidden absolute inset-0 z-20 bg-slate-950/88 backdrop-blur-sm flex flex-col items-center justify-center cursor-pointer select-none">
+              <div class="w-20 h-20 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center text-4xl shadow-2xl mb-4 transition">▶</div>
+              <div class="text-white font-black text-xl tracking-wide">Video Paused</div>
+              <div class="text-slate-300 text-sm font-semibold mt-1">Click anywhere to resume • Press ESC or Back to return</div>
+            </div>
           </div>
         </div>
       `;
       viewer.classList.remove('hidden');
+    }
+
+    function toggleYtBottomMask() {
+      ytBottomMasked = !ytBottomMasked;
+      const bottomMask = document.getElementById('ytBottomBadgeMask');
+      const maskBtn = document.getElementById('stageYtMaskBtn');
+      if (bottomMask) bottomMask.classList.toggle('hidden', !ytBottomMasked);
+      if (maskBtn) {
+        if (ytBottomMasked) {
+          maskBtn.textContent = '✨ Bottom Hidden (Show Ad/Skip)';
+          maskBtn.className = 'px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm shadow transition';
+        } else {
+          maskBtn.textContent = '📢 Ad/Skip Visible (Hide Bottom)';
+          maskBtn.className = 'px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm shadow transition';
+        }
+      }
     }
 
     function toggleCleanYouTubePlayPause() {
@@ -3258,6 +3321,8 @@ service cloud.firestore {
       if (btn) btn.textContent = ytIsPlaying ? '⏸ Pause' : '▶ Play';
       if (curtain) curtain.classList.toggle('hidden', ytIsPlaying);
     }
+
+    
 
     // ==================== IN-HTML WEB LINK VIEWER + LIVE MALAYALAM READER (NO REFUSED TO CONNECT!) ====================
     let currentWebLinkUrl = '';
@@ -3507,7 +3572,7 @@ service cloud.firestore {
     function openFullscreenWebLink(url, title, startInMalayalam = false) {
       const viewer = document.getElementById('stageMediaViewer');
       document.getElementById('stageYtPlayPauseBtn')?.classList.add('hidden');
-
+      document.getElementById('stageYtMaskBtn')?.classList.add('hidden');
       currentWebLinkUrl = url;
       currentWebLinkTitle = title;
       isWebLinkTranslatedMl = !!startInMalayalam;
