@@ -1269,6 +1269,10 @@ service cloud.firestore {
           <div class="p-3 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-900">
             ℹ️ Clicking this thumbnail opens the webpage <strong>strictly inside this HTML presentation</strong> with a <strong>← Back to Slide</strong> button!
           </div>
+          <label class="flex items-center gap-2.5 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs sm:text-sm font-bold text-emerald-900 cursor-pointer font-ml">
+            <input id="webLinkAutoMl" type="checkbox" class="w-4 h-4 accent-emerald-600 rounded" />
+            <span>🌐 ഈ ലിങ്ക് തുറക്കുമ്പോൾ തന്നെ മലയാളത്തിലേക്ക് വിവർത്തനം ചെയ്യുക (Open in Malayalam by default)</span>
+          </label>
           <button onclick="saveWebLinkToSlide()" class="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm shadow transition">
             💾 Add Link Thumbnail &amp; Save
           </button>
@@ -1292,6 +1296,16 @@ service cloud.firestore {
         <button id="stageYtPlayPauseBtn" onclick="toggleCleanYouTubePlayPause()" class="hidden px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs sm:text-sm border border-slate-700 transition">
           ⏸ Pause
         </button>
+        <!-- Malayalam Translation Toggle (shown ONLY for Web Links) -->
+        <button id="stageWebTranslateBtn" onclick="toggleWebLinkMalayalam()" class="hidden px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm shadow transition flex items-center gap-1.5 font-ml">
+          <span>🌐</span><span>മലയാളം വിവർത്തനം</span>
+        </button>
+
+        <!-- Fallback button in case a strict website blocks iframe embedding -->
+        <a id="stageWebExternalBtn" href="#" target="_blank" rel="noopener noreferrer" title="If page is blank, open translated page in a new tab" class="hidden px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition">
+          ↗ Open Tab
+        </a>
+        
         <span class="hidden sm:inline text-xs text-slate-400 font-semibold">Press ESC to return</span>
       </div>
     </div>
@@ -1768,7 +1782,7 @@ service cloud.firestore {
         const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
         const card = document.createElement('div');
         card.className = 'media-thumb-card group relative w-44 sm:w-52 rounded-2xl overflow-hidden border-2 border-blue-200 hover:border-blue-600 bg-white shadow-sm cursor-pointer';
-        card.onclick = () => openFullscreenWebLink(lnk.url, lnk.title || domain);
+        card.onclick = () => openFullscreenWebLink(lnk.url, lnk.title || domain, !!lnk.openInMalayalam);
         card.innerHTML = `
           <button onclick="event.stopPropagation(); deleteSlideMediaItem('${slideId}', 'links', ${idx})" title="Remove Link" class="opacity-0 group-hover:opacity-100 absolute top-1.5 right-1.5 z-10 w-6 h-6 rounded-full bg-rose-600 text-white text-xs font-black shadow transition">✕</button>
           <div class="relative h-24 sm:h-28 bg-gradient-to-br from-blue-50 via-indigo-50 to-slate-100 overflow-hidden flex flex-col items-center justify-center p-2 text-center">
@@ -3052,6 +3066,8 @@ service cloud.firestore {
 
     function openVideoLinkModal() {
       const activeId = appState.order[currentSlideIndex];
+      const autoMl = document.getElementById('webLinkAutoMl');
+      if (autoMl) autoMl.checked = false;
       document.getElementById('vlModalTargetLabel').textContent = `Target: ${getSlideTitleById(activeId)}`;
       document.getElementById('ytUrlInput').value = '';
       document.getElementById('ytTitleInput').value = '';
@@ -3120,11 +3136,12 @@ service cloud.firestore {
 
       const title = document.getElementById('webLinkTitleInput').value.trim() || url;
       const thumb = document.getElementById('webLinkThumbInput').value.trim();
+      const openInMalayalam = !!document.getElementById('webLinkAutoMl')?.checked;
       const slideId = appState.order[currentSlideIndex];
 
       appState.slideMedia[slideId] = appState.slideMedia[slideId] || {};
       appState.slideMedia[slideId].links = appState.slideMedia[slideId].links || [];
-      appState.slideMedia[slideId].links.push({ url, title, thumb, addedAt: Date.now() });
+      appState.slideMedia[slideId].links.push({ url, title, thumb, openInMalayalam, addedAt: Date.now() });
 
       const secEl = document.querySelector(`section[data-slide-id="${slideId}"]`);
       if (secEl) renderSlideFeatureImage(secEl, slideId);
@@ -3178,6 +3195,8 @@ service cloud.firestore {
       const body = document.getElementById('stageMediaBody');
       document.getElementById('stageMediaTitle').textContent = `🖼️ ${caption}`;
       document.getElementById('stageYtPlayPauseBtn').classList.add('hidden');
+      document.getElementById('stageWebTranslateBtn')?.classList.add('hidden');
+      document.getElementById('stageWebExternalBtn')?.classList.add('hidden');
 
       body.innerHTML = `
         <img src="${src}" alt="${escapeHtml(caption)}" class="max-w-[96vw] max-h-[88vh] object-contain rounded-2xl shadow-2xl select-none" />
@@ -3190,6 +3209,8 @@ service cloud.firestore {
       const body = document.getElementById('stageMediaBody');
       document.getElementById('stageMediaTitle').textContent = `🎬 ${title}`;
       const ppBtn = document.getElementById('stageYtPlayPauseBtn');
+      document.getElementById('stageWebTranslateBtn')?.classList.add('hidden');
+      document.getElementById('stageWebExternalBtn')?.classList.add('hidden');
       ppBtn.classList.remove('hidden');
       ppBtn.textContent = '⏸ Pause';
       ytIsPlaying = true;
@@ -3238,21 +3259,84 @@ service cloud.firestore {
       if (curtain) curtain.classList.toggle('hidden', ytIsPlaying);
     }
 
-    function openFullscreenWebLink(url, title) {
-      const viewer = document.getElementById('stageMediaViewer');
-      const body = document.getElementById('stageMediaBody');
-      document.getElementById('stageMediaTitle').textContent = `🔗 ${title}`;
-      document.getElementById('stageYtPlayPauseBtn').classList.add('hidden');
+    // ==================== IN-HTML WEB LINK VIEWER + MALAYALAM TRANSLATION ====================
+    let currentWebLinkUrl = '';
+    let currentWebLinkTitle = '';
+    let isWebLinkTranslatedMl = false;
 
-      // Opens strictly INSIDE our HTML via fullscreen iframe (no new tab!)
+    // Converts any URL into Google's direct .translate.goog Malayalam proxy URL (works inside iframe!)
+    function buildMalayalamTranslateUrl(rawUrl) {
+      try {
+        const parsed = new URL(rawUrl);
+        const translatedHost = parsed.hostname.replace(/-/g, '--').replace(/\./g, '-') + '.translate.goog';
+        const params = new URLSearchParams(parsed.search);
+        params.set('_x_tr_sl', 'auto');
+        params.set('_x_tr_tl', 'ml');
+        params.set('_x_tr_hl', 'ml');
+        params.set('_x_tr_pto', 'wapp');
+        return `https://${translatedHost}${parsed.pathname}?${params.toString()}${parsed.hash}`;
+      } catch (_) {
+        return `https://translate.google.com/translate?sl=auto&tl=ml&u=${encodeURIComponent(rawUrl)}`;
+      }
+    }
+
+    function renderActiveWebLinkIframe() {
+      const body = document.getElementById('stageMediaBody');
+      const trBtn = document.getElementById('stageWebTranslateBtn');
+      const extBtn = document.getElementById('stageWebExternalBtn');
+
+      const activeUrl = isWebLinkTranslatedMl
+        ? buildMalayalamTranslateUrl(currentWebLinkUrl)
+        : currentWebLinkUrl;
+
+      document.getElementById('stageMediaTitle').textContent = isWebLinkTranslatedMl
+        ? `🌐 മലയാളം • ${currentWebLinkTitle}`
+        : `🔗 ${currentWebLinkTitle}`;
+
+      if (trBtn) {
+        trBtn.classList.remove('hidden');
+        if (isWebLinkTranslatedMl) {
+          trBtn.innerHTML = '<span>↩️</span><span>Original Language</span>';
+          trBtn.className = 'px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm shadow transition flex items-center gap-1.5';
+        } else {
+          trBtn.innerHTML = '<span>🌐</span><span>മലയാളം വിവർത്തനം</span>';
+          trBtn.className = 'px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm shadow transition flex items-center gap-1.5 font-ml';
+        }
+      }
+
+      if (extBtn) {
+        extBtn.classList.remove('hidden');
+        extBtn.href = isWebLinkTranslatedMl
+          ? `https://translate.google.com/translate?sl=auto&tl=ml&u=${encodeURIComponent(currentWebLinkUrl)}`
+          : currentWebLinkUrl;
+      }
+
       body.innerHTML = `
         <div class="relative w-full h-full bg-white flex flex-col">
-          <iframe src="${escapeHtml(url)}"
+          <iframe src="${escapeHtml(activeUrl)}"
                   class="w-full flex-1 border-0 bg-white"
                   sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
         </div>
       `;
+    }
+
+    function openFullscreenWebLink(url, title, startInMalayalam = false) {
+      const viewer = document.getElementById('stageMediaViewer');
+      document.getElementById('stageYtPlayPauseBtn')?.classList.add('hidden');
+
+      currentWebLinkUrl = url;
+      currentWebLinkTitle = title;
+      isWebLinkTranslatedMl = !!startInMalayalam;
+
+      renderActiveWebLinkIframe();
       viewer.classList.remove('hidden');
+    }
+
+    function toggleWebLinkMalayalam() {
+      if (!currentWebLinkUrl) return;
+      isWebLinkTranslatedMl = !isWebLinkTranslatedMl;
+      renderActiveWebLinkIframe();
+      showToast(isWebLinkTranslatedMl ? 'മലയാളം വിവർത്തനം ലോഡ് ചെയ്യുന്നു...' : 'Switched back to Original Language', '🌐');
     }
 
     function closeStageMediaViewer() {
