@@ -3259,24 +3259,207 @@ service cloud.firestore {
       if (curtain) curtain.classList.toggle('hidden', ytIsPlaying);
     }
 
-    // ==================== IN-HTML WEB LINK VIEWER + MALAYALAM TRANSLATION ====================
+    // ==================== IN-HTML WEB LINK VIEWER + LIVE MALAYALAM READER (NO REFUSED TO CONNECT!) ====================
     let currentWebLinkUrl = '';
     let currentWebLinkTitle = '';
     let isWebLinkTranslatedMl = false;
+    let readerFontSizePx = 22;
 
-    // Converts any URL into Google's direct .translate.goog Malayalam proxy URL (works inside iframe!)
-    function buildMalayalamTranslateUrl(rawUrl) {
+    // Translates a text chunk to Malayalam (CORS-friendly, with automatic fallback)
+    async function translateChunkToMalayalam(text) {
+      const clean = (text || '').trim();
+      if (!clean) return '';
+
+      // Primary: Google Translate public endpoint (fast & accurate Malayalam)
       try {
-        const parsed = new URL(rawUrl);
-        const translatedHost = parsed.hostname.replace(/-/g, '--').replace(/\./g, '-') + '.translate.goog';
-        const params = new URLSearchParams(parsed.search);
-        params.set('_x_tr_sl', 'auto');
-        params.set('_x_tr_tl', 'ml');
-        params.set('_x_tr_hl', 'ml');
-        params.set('_x_tr_pto', 'wapp');
-        return `https://${translatedHost}${parsed.pathname}?${params.toString()}${parsed.hash}`;
-      } catch (_) {
-        return `https://translate.google.com/translate?sl=auto&tl=ml&u=${encodeURIComponent(rawUrl)}`;
+        const res = await fetch(
+          `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ml&dt=t&q=${encodeURIComponent(clean)}`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && Array.isArray(data[0])) {
+            return data[0].map(part => part[0] || '').join('');
+          }
+        }
+      } catch (_) {}
+
+      // Fallback: MyMemory Free Translation API (100% CORS-open)
+      try {
+        const res2 = await fetch(
+          `https://api.mymemory.translated.net/get?q=${encodeURIComponent(clean.slice(0, 480))}&langpair=en|ml`
+        );
+        if (res2.ok) {
+          const data2 = await res2.json();
+          if (data2?.responseData?.translatedText) {
+            return data2.responseData.translatedText;
+          }
+        }
+      } catch (_) {}
+
+      return clean; // Return original text if offline
+    }
+
+    // Checks if a Wikipedia URL has an official Malayalam Wikipedia article
+    async function findOfficialMalayalamWikiUrl(rawUrl) {
+      const m = rawUrl.match(/^https?:\/\/([a-z-]+)\.wikipedia\.org\/wiki\/([^#?]+)/i);
+      if (!m) return null;
+      const lang = m[1].toLowerCase();
+      const pageSlug = decodeURIComponent(m[2]);
+      if (lang === 'ml') return rawUrl;
+
+      try {
+        const apiUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&prop=langlinks&lllang=ml&titles=${encodeURIComponent(pageSlug)}&format=json&origin=*`;
+        const res = await fetch(apiUrl);
+        if (!res.ok) return null;
+        const json = await res.json();
+        const pages = json?.query?.pages || {};
+        const firstPage = Object.values(pages)[0];
+        const mlTitle = firstPage?.langlinks?.[0]?.['*'];
+        if (mlTitle) {
+          return `https://ml.wikipedia.org/wiki/${encodeURIComponent(mlTitle.replace(/ /g, '_'))}`;
+        }
+      } catch (_) {}
+      return null;
+    }
+
+    // Extracts clean paragraphs from Wikipedia API or any webpage via r.jina.ai
+    async function extractReadableParagraphs(rawUrl) {
+      // Fast path for Wikipedia articles (official CORS-open API)
+      const wikiMatch = rawUrl.match(/^https?:\/\/([a-z-]+)\.wikipedia\.org\/wiki\/([^#?]+)/i);
+      if (wikiMatch) {
+        const lang = wikiMatch[1];
+        const pageSlug = decodeURIComponent(wikiMatch[2]);
+        const res = await fetch(
+          `https://${lang}.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=${encodeURIComponent(pageSlug)}&format=json&origin=*`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const page = Object.values(data?.query?.pages || {})[0];
+          if (page && page.extract) {
+            const blocks = page.extract
+              .split(/\n+/)
+              .map(s => s.trim())
+              .filter(s => s.length > 25 && !s.startsWith('== References') && !s.startsWith('== External links'))
+              .slice(0, 12);
+            return { title: page.title || currentWebLinkTitle, blocks };
+          }
+        }
+      }
+
+      // Universal path for ANY website via Jina Reader (CORS-open, strips ads & menus)
+      const res = await fetch(`https://r.jina.ai/${rawUrl}`, {
+        headers: { 'Accept': 'text/plain' }
+      });
+      if (!res.ok) throw new Error('Could not fetch page content');
+      const md = await res.text();
+
+      const titleMatch = md.match(/^Title:\s*(.+)$/m);
+      const extractedTitle = titleMatch ? titleMatch[1].trim() : currentWebLinkTitle;
+
+      // Strip Jina header metadata & markdown noise into clean readable paragraphs
+      const bodyPart = md.includes('Markdown Content:') ? md.split('Markdown Content:')[1] : md;
+      const blocks = bodyPart
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, '')               // remove markdown images
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')            // keep link text only
+        .replace(/[#*_`>]/g, '')                            // remove markdown symbols
+        .split(/\n{2,}/)
+        .map(p => p.replace(/\s+/g, ' ').trim())
+        .filter(p => p.length > 35 && !/^https?:\/\//i.test(p))
+        .slice(0, 12);
+
+      return { title: extractedTitle, blocks };
+    }
+
+    function adjustReaderFont(delta) {
+      readerFontSizePx = Math.max(16, Math.min(34, readerFontSizePx + delta));
+      const container = document.getElementById('mlReaderArticleBody');
+      if (container) container.style.fontSize = `${readerFontSizePx}px`;
+    }
+
+    async function renderMalayalamInAppReader(forceAutoTranslate = false) {
+      const body = document.getElementById('stageMediaBody');
+      body.innerHTML = `
+        <div class="w-full h-full bg-slate-50 flex flex-col items-center justify-center p-8 text-center">
+          <div class="w-12 h-12 rounded-full border-4 border-emerald-600 border-t-transparent animate-spin mb-4"></div>
+          <div class="font-ml text-xl font-black text-slate-900">മലയാളത്തിലേക്ക് വിവർത്തനം ചെയ്യുന്നു...</div>
+          <div class="text-sm text-slate-600 mt-1">Loading clean Malayalam view inside your presentation</div>
+        </div>
+      `;
+
+      // 1. If Wikipedia has an official Malayalam Wikipedia article, load it directly (zero refused-to-connect!)
+      if (!forceAutoTranslate) {
+        const mlWikiUrl = await findOfficialMalayalamWikiUrl(currentWebLinkUrl);
+        if (mlWikiUrl) {
+          body.innerHTML = `
+            <div class="relative w-full h-full bg-white flex flex-col">
+              <div class="px-4 py-2 bg-emerald-50 border-b border-emerald-200 flex flex-wrap items-center justify-between gap-2 text-xs text-emerald-900 font-ml">
+                <span>✅ <strong>മലയാളം വിക്കിപീഡിയ</strong> പേജ് നേരിട്ട് തുറന്നിരിക്കുന്നു.</span>
+                <button onclick="renderMalayalamInAppReader(true)" class="px-3 py-1 rounded-lg bg-white hover:bg-emerald-100 border border-emerald-300 font-bold text-emerald-800">
+                  🤖 ഇംഗ്ലീഷ് ലേഖനം നേരിട്ട് വിവർത്തനം ചെയ്യുക (Reader Mode)
+                </button>
+              </div>
+              <iframe src="${escapeHtml(mlWikiUrl)}"
+                      class="w-full flex-1 border-0 bg-white"
+                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+            </div>
+          `;
+          return;
+        }
+      }
+
+      // 2. Otherwise, extract clean article & translate in parallel (100% inside HTML!)
+      try {
+        const { title, blocks } = await extractReadableParagraphs(currentWebLinkUrl);
+        if (!blocks || blocks.length === 0) throw new Error('No readable text found on this webpage.');
+
+        // Translate title + all paragraphs in parallel (no for-loop timeout!)
+        const [mlTitle, ...mlBlocks] = await Promise.all([
+          translateChunkToMalayalam(title),
+          ...blocks.map(b => translateChunkToMalayalam(b.slice(0, 750)))
+        ]);
+
+        body.innerHTML = `
+          <div class="w-full h-full bg-slate-50 overflow-y-auto px-4 sm:px-8 py-6">
+            <div class="max-w-4xl mx-auto bg-white rounded-3xl border border-slate-200 shadow-lg p-6 sm:p-10">
+              <div class="flex flex-wrap items-center justify-between gap-3 pb-4 mb-6 border-b border-slate-200">
+                <span class="px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold font-ml">
+                  🌐 മലയാളം റീഡർ (Live Translated Inside Presentation)
+                </span>
+                <div class="flex items-center gap-2">
+                  <button onclick="adjustReaderFont(-2)" class="px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-black border border-slate-300">A−</button>
+                  <button onclick="adjustReaderFont(2)" class="px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-black border border-slate-300">A+</button>
+                </div>
+              </div>
+
+              <h1 class="font-ml text-3xl sm:text-4xl font-black text-slate-900 mb-6 leading-snug">
+                ${escapeHtml(mlTitle || title)}
+              </h1>
+
+              <div id="mlReaderArticleBody" class="font-ml text-slate-800 space-y-5 leading-relaxed" style="font-size: ${readerFontSizePx}px;">
+                ${mlBlocks.map(p => `<p>${escapeHtml(p)}</p>`).join('')}
+              </div>
+
+              <div class="mt-8 pt-4 border-t border-slate-200 text-xs text-slate-500 flex flex-wrap items-center justify-between gap-2">
+                <span>Source: ${escapeHtml(currentWebLinkUrl)}</span>
+                <button onclick="toggleWebLinkMalayalam()" class="text-blue-600 font-bold hover:underline">↩️ View Original Webpage</button>
+              </div>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        body.innerHTML = `
+          <div class="w-full h-full bg-slate-50 flex flex-col items-center justify-center p-8 text-center">
+            <div class="max-w-lg bg-white p-8 rounded-3xl border border-slate-200 shadow-lg space-y-4">
+              <div class="text-4xl">🌐</div>
+              <h3 class="text-xl font-black text-slate-900 font-ml">ഈ വെബ്സൈറ്റ് ഓട്ടോ-റീഡറിനെ തടയുന്നു</h3>
+              <p class="text-sm text-slate-600 font-ml">ചില വെബ്സൈറ്റുകൾ സുരക്ഷാ കാരണങ്ങളാൽ പുറത്തുനിന്നുള്ള വിവർത്തനം അനുവദിക്കുന്നില്ല.</p>
+              <div class="flex flex-wrap justify-center gap-3 pt-2">
+                <button onclick="toggleWebLinkMalayalam()" class="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-sm">↩️ Back to Original</button>
+                <a href="https://translate.google.com/translate?sl=auto&tl=ml&u=${encodeURIComponent(currentWebLinkUrl)}" target="_blank" rel="noopener noreferrer" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm">↗ Open in Google Translate</a>
+              </div>
+            </div>
+          </div>
+        `;
       }
     }
 
@@ -3284,10 +3467,6 @@ service cloud.firestore {
       const body = document.getElementById('stageMediaBody');
       const trBtn = document.getElementById('stageWebTranslateBtn');
       const extBtn = document.getElementById('stageWebExternalBtn');
-
-      const activeUrl = isWebLinkTranslatedMl
-        ? buildMalayalamTranslateUrl(currentWebLinkUrl)
-        : currentWebLinkUrl;
 
       document.getElementById('stageMediaTitle').textContent = isWebLinkTranslatedMl
         ? `🌐 മലയാളം • ${currentWebLinkTitle}`
@@ -3311,9 +3490,14 @@ service cloud.firestore {
           : currentWebLinkUrl;
       }
 
+      if (isWebLinkTranslatedMl) {
+        renderMalayalamInAppReader(false);
+        return;
+      }
+
       body.innerHTML = `
         <div class="relative w-full h-full bg-white flex flex-col">
-          <iframe src="${escapeHtml(activeUrl)}"
+          <iframe src="${escapeHtml(currentWebLinkUrl)}"
                   class="w-full flex-1 border-0 bg-white"
                   sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
         </div>
@@ -3336,7 +3520,6 @@ service cloud.firestore {
       if (!currentWebLinkUrl) return;
       isWebLinkTranslatedMl = !isWebLinkTranslatedMl;
       renderActiveWebLinkIframe();
-      showToast(isWebLinkTranslatedMl ? 'മലയാളം വിവർത്തനം ലോഡ് ചെയ്യുന്നു...' : 'Switched back to Original Language', '🌐');
     }
 
     function closeStageMediaViewer() {
