@@ -115,7 +115,7 @@
       animation: penPulse 0.9s infinite ease-in-out;
     }
 
-    /* Auto-Hide Top Header & Bottom Footer Bars (Keynote / Projector Mode) */
+    /* Auto-Hide & Toggle-Pin Top Header and Bottom Prev/Next Bars */
     .auto-hide-header {
       position: fixed !important;
       top: 0;
@@ -126,10 +126,11 @@
       pointer-events: none;
       transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
     }
-    .auto-hide-header.bar-visible {
-      transform: translateY(0);
-      opacity: 1;
-      pointer-events: auto;
+    .auto-hide-header.bar-visible,
+    .auto-hide-header.bar-pinned {
+      transform: translateY(0) !important;
+      opacity: 1 !important;
+      pointer-events: auto !important;
     }
 
     .auto-hide-footer {
@@ -142,11 +143,22 @@
       pointer-events: none;
       transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
     }
-    .auto-hide-footer.bar-visible {
-      transform: translateY(0);
-      opacity: 1;
-      pointer-events: auto;
+    .auto-hide-footer.bar-visible,
+    .auto-hide-footer.bar-pinned {
+      transform: translateY(0) !important;
+      opacity: 1 !important;
+      pointer-events: auto !important;
     }
+
+    /* Slide Thumbnail Media Strip */
+    .media-thumb-card {
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+    .media-thumb-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.14);
+    }
+
     
   </style>
 </head>
@@ -195,6 +207,21 @@
       <!-- Current Slide Image Manager -->
       <button onclick="openImageManagerForCurrentSlide()" title="Add/Change Concerned or Background Image for Current Slide" class="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs sm:text-sm font-bold flex items-center gap-1.5 transition">
         <span>🖼️</span><span class="hidden sm:inline">Slide Image</span>
+      </button>
+
+      <!-- Add YouTube Video or Web Link Thumbnail -->
+      <button onclick="openVideoLinkModal()" title="Add YouTube Video or Web Link Thumbnail to Current Slide" class="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 text-xs sm:text-sm font-bold flex items-center gap-1.5 transition">
+        <span>🎬</span><span class="hidden sm:inline">Video / Link</span>
+      </button>
+
+      <!-- Show / Auto-Hide Header Bar Toggle -->
+      <button id="toggleHeaderPinBtn" onclick="toggleHeaderPinMode()" title="Toggle Header Bar: Auto-Hide on Mouse Touch vs Always Shown" class="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-bold flex items-center gap-1 transition">
+        <span>👁️</span><span>Header: Auto</span>
+      </button>
+
+      <!-- Show / Auto-Hide Previous/Next Bar Toggle -->
+      <button id="toggleFooterPinBtn" onclick="toggleFooterPinMode()" title="Toggle Prev/Next Bar: Auto-Hide on Mouse Touch vs Always Shown" class="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-bold flex items-center gap-1 transition">
+        <span>👁️</span><span>Nav: Auto</span>
       </button>
 
       <!-- Reorder / All Slides Button -->
@@ -740,9 +767,7 @@
               <div class="mt-3 pt-2 border-t border-amber-200 text-[11px] text-slate-600">OECD (38 അംഗരാജ്യങ്ങൾ, 1961, പാരീസ്) — ഇന്ത്യ Key Partner രാജ്യമാണ്.</div>
             </div>
           </div><br>
-          <a href="https://en.wikipedia.org/wiki/OECD" target="_blank" rel="noopener noreferrer"
-                class="text-blue-600 underline font-bold hover:text-blue-800">
-                OECD COUNTRIES (1961) </a>
+          
         </section>
 
         <!-- ==================== SLIDE 18 ==================== -->
@@ -1187,6 +1212,96 @@ service cloud.firestore {
     </div>
   </div>
 
+  <!-- ==================== MODAL 5: ADD YOUTUBE VIDEO OR WEB LINK THUMBNAIL ==================== -->
+  <div id="videoLinkModal" class="hidden fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[75] flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-xl w-full max-h-[90vh] flex flex-col border border-slate-200 shadow-2xl overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+        <div>
+          <h3 class="text-xl font-black text-slate-900">🎬 Add Video / Web Link Thumbnail</h3>
+          <p id="vlModalTargetLabel" class="text-xs text-blue-700 font-semibold">Target: Current Slide</p>
+        </div>
+        <button onclick="closeVideoLinkModal()" class="p-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold">✕</button>
+      </div>
+
+      <!-- Tabs: YouTube Video vs Web Link -->
+      <div class="px-6 pt-3 border-b border-slate-200 flex gap-2 bg-white">
+        <button onclick="switchVLTab('youtube')" id="vlTabBtn-youtube" class="px-4 py-2 rounded-t-xl text-xs sm:text-sm font-bold border-b-2 border-rose-600 text-rose-700 bg-rose-50/70">▶️ YouTube Video</button>
+        <button onclick="switchVLTab('link')" id="vlTabBtn-link" class="px-4 py-2 rounded-t-xl text-xs sm:text-sm font-bold border-b-2 border-transparent text-slate-600 hover:text-slate-900">🔗 Web Link (Opens Inside HTML)</button>
+      </div>
+
+      <div class="p-6 overflow-y-auto space-y-4">
+        <!-- TAB A: YOUTUBE VIDEO -->
+        <div id="vlPanel-youtube" class="space-y-4">
+          <div>
+            <label class="block text-xs font-bold uppercase text-slate-600 mb-1">YouTube Video URL</label>
+            <input id="ytUrlInput" type="url" oninput="previewYouTubeThumb()" placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:border-rose-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase text-slate-600 mb-1">Video Title / Label (English / മലയാളം)</label>
+            <input id="ytTitleInput" type="text" placeholder="e.g., BBC Infinite Scroll Apology" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-ml focus:outline-none focus:border-rose-500" />
+          </div>
+          <div id="ytThumbPreviewBox" class="hidden p-3 rounded-2xl bg-slate-50 border border-slate-200 flex items-center gap-3">
+            <img id="ytThumbPreviewImg" src="" alt="YouTube Thumbnail" class="w-32 h-20 object-cover rounded-xl border border-slate-300" />
+            <div class="text-xs text-slate-700">
+              <div class="font-bold text-emerald-700">✅ Valid YouTube Video Detected</div>
+              <p class="mt-0.5 text-slate-500">Shows as a compact thumbnail on the slide. Plays full-screen with NO controls, share, playlist, or next/prev buttons!</p>
+            </div>
+          </div>
+          <button onclick="saveYouTubeToSlide()" class="w-full py-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-sm shadow transition">
+            💾 Add YouTube Thumbnail &amp; Save
+          </button>
+        </div>
+
+        <!-- TAB B: WEB LINK (OPENS INSIDE HTML) -->
+        <div id="vlPanel-link" class="hidden space-y-4">
+          <div>
+            <label class="block text-xs font-bold uppercase text-slate-600 mb-1">Website / Resource URL</label>
+            <input id="webLinkUrlInput" type="url" placeholder="https://swayam.gov.in or https://cybercrime.gov.in" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:border-blue-600" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase text-slate-600 mb-1">Link Title / Label (English / മലയാളം)</label>
+            <input id="webLinkTitleInput" type="text" placeholder="e.g., Open SWAYAM Free Courses" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-ml focus:outline-none focus:border-blue-600" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase text-slate-600 mb-1">Optional Thumbnail Image URL (Leave blank for auto preview card)</label>
+            <input id="webLinkThumbInput" type="url" placeholder="https://... (optional)" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:border-blue-600" />
+          </div>
+          <div class="p-3 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-900">
+            ℹ️ Clicking this thumbnail opens the webpage <strong>strictly inside this HTML presentation</strong> with a <strong>← Back to Slide</strong> button!
+          </div>
+          <button onclick="saveWebLinkToSlide()" class="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-sm shadow transition">
+            💾 Add Link Thumbnail &amp; Save
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL 6: FULLSCREEN STAGE MEDIA VIEWER (IMAGE / CLEAN YOUTUBE / IN-APP LINK) ==================== -->
+  <div id="stageMediaViewer" class="hidden fixed inset-0 z-[95] bg-slate-950 flex flex-col">
+    <!-- Floating Top Back Bar -->
+    <div id="stageMediaTopBar" class="w-full px-4 sm:px-6 py-3 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between gap-3 z-30">
+      <div class="flex items-center gap-3 min-w-0">
+        <button onclick="closeStageMediaViewer()" class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs sm:text-sm flex items-center gap-2 shadow-lg transition shrink-0">
+          <span>←</span><span>Back to Slide</span>
+        </button>
+        <div id="stageMediaTitle" class="text-sm sm:text-base font-bold text-slate-100 truncate font-ml">Media Viewer</div>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <!-- Play/Pause button (shown ONLY for clean YouTube video mode) -->
+        <button id="stageYtPlayPauseBtn" onclick="toggleCleanYouTubePlayPause()" class="hidden px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs sm:text-sm border border-slate-700 transition">
+          ⏸ Pause
+        </button>
+        <span class="hidden sm:inline text-xs text-slate-400 font-semibold">Press ESC to return</span>
+      </div>
+    </div>
+
+    <!-- Fullscreen Content Area -->
+    <div id="stageMediaBody" class="flex-1 relative w-full h-full flex items-center justify-center overflow-hidden bg-black">
+      <!-- Populated dynamically for Image, Clean YouTube Player, or In-HTML Web Iframe -->
+    </div>
+  </div>
+
   <script>
     // ==================== BUILT-IN SPEAKER SCRIPT DATA ====================
     const builtinNotesMap = {
@@ -1587,21 +1702,90 @@ service cloud.firestore {
       if (currentSlideIndex >= appState.order.length) currentSlideIndex = appState.order.length - 1;
     }
 
+    // Renders Image, YouTube Videos & Web Links strictly as compact Thumbnails with Click-to-Fullscreen
     function renderSlideFeatureImage(secEl, slideId) {
-      const existingBanner = secEl.querySelector('.slide-feature-media-box');
-      if (existingBanner) existingBanner.remove();
+      const existingDock = secEl.querySelector('.slide-feature-media-box');
+      if (existingDock) existingDock.remove();
 
       const media = appState.slideMedia[slideId];
-      const imgSrc = media && media.featureImage ? resolveImageUrl(media.featureImage) : '';
+      if (!media) return;
+
+      const imgSrc = media.featureImage ? resolveImageUrl(media.featureImage) : '';
+      const videos = Array.isArray(media.videos) ? media.videos : [];
+      const links = Array.isArray(media.links) ? media.links : [];
+
+      if (!imgSrc && videos.length === 0 && links.length === 0) return;
+
+      const dock = document.createElement('div');
+      dock.className = 'slide-feature-media-box mt-6 w-full flex flex-wrap items-center justify-center gap-3.5';
+
+      // 1. IMAGE THUMBNAIL CARD (With Delete Button + Click -> Fullscreen Image Viewer)
       if (imgSrc) {
-        const box = document.createElement('div');
-        box.className = 'slide-feature-media-box mt-6 w-full max-w-3xl mx-auto rounded-3xl overflow-hidden border border-slate-200 bg-white shadow-md';
-        box.innerHTML = `
-          <img src="${imgSrc}" alt="${escapeHtml(media.featureCaption || 'Concerned Slide Visual')}" class="w-full max-h-72 object-cover" />
-          ${media.featureCaption ? `<div class="px-4 py-2 text-xs sm:text-sm font-bold text-slate-700 bg-slate-50 border-t border-slate-200 text-center font-ml">${escapeHtml(media.featureCaption)}</div>` : ''}
+        const card = document.createElement('div');
+        card.className = 'media-thumb-card group relative w-44 sm:w-52 rounded-2xl overflow-hidden border-2 border-slate-200 hover:border-blue-500 bg-white shadow-sm cursor-pointer';
+        card.onclick = () => openFullscreenImage(imgSrc, media.featureCaption || 'Slide Image');
+        card.innerHTML = `
+          <button onclick="event.stopPropagation(); deleteSlideFeatureImage('${slideId}')"
+                  title="Delete Image from Slide"
+                  class="sm:opacity-0 sm:group-hover:opacity-100 absolute top-1.5 right-1.5 z-10 w-6 h-6 rounded-full bg-rose-600 hover:bg-rose-700 text-white text-xs font-black shadow-md flex items-center justify-center transition">✕</button>
+          <div class="relative h-24 sm:h-28 bg-slate-100 overflow-hidden">
+            <img src="${imgSrc}" alt="${escapeHtml(media.featureCaption || 'Slide Visual')}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
+            <span class="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded-md bg-slate-900/80 text-white text-[10px] font-bold">⛶ Fullscreen</span>
+          </div>
+          <div class="px-2.5 py-1.5 text-xs font-bold text-slate-800 truncate font-ml bg-slate-50 border-t border-slate-100">
+            🖼️ ${escapeHtml(media.featureCaption || 'View Image')}
+          </div>
         `;
-        secEl.appendChild(box);
+        dock.appendChild(card);
       }
+
+      // 2. YOUTUBE VIDEO THUMBNAIL CARDS (Click -> Clean Fullscreen Player without Controls/Share/Playlist/Loop)
+      videos.forEach((vid, idx) => {
+        const thumbUrl = `https://img.youtube.com/vi/${vid.videoId}/hqdefault.jpg`;
+        const card = document.createElement('div');
+        card.className = 'media-thumb-card group relative w-44 sm:w-52 rounded-2xl overflow-hidden border-2 border-rose-200 hover:border-rose-500 bg-white shadow-sm cursor-pointer';
+        card.onclick = () => openFullscreenYouTube(vid.videoId, vid.title || 'YouTube Video');
+        card.innerHTML = `
+          <button onclick="event.stopPropagation(); deleteSlideMediaItem('${slideId}', 'videos', ${idx})" title="Remove Video" class="opacity-0 group-hover:opacity-100 absolute top-1.5 right-1.5 z-10 w-6 h-6 rounded-full bg-rose-600 text-white text-xs font-black shadow transition">✕</button>
+          <div class="relative h-24 sm:h-28 bg-slate-900 overflow-hidden flex items-center justify-center">
+            <img src="${thumbUrl}" alt="${escapeHtml(vid.title)}" class="w-full h-full object-cover opacity-90 group-hover:scale-105 transition duration-300" />
+            <div class="absolute inset-0 flex items-center justify-center bg-black/25 group-hover:bg-black/10 transition">
+              <span class="w-10 h-10 rounded-full bg-rose-600 text-white flex items-center justify-center text-base shadow-lg">▶</span>
+            </div>
+            <span class="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded-md bg-slate-900/85 text-white text-[10px] font-bold">⛶ Clean Play</span>
+          </div>
+          <div class="px-2.5 py-1.5 text-xs font-bold text-slate-800 truncate font-ml bg-rose-50/40 border-t border-rose-100">
+            🎬 ${escapeHtml(vid.title || 'Play Video')}
+          </div>
+        `;
+        dock.appendChild(card);
+      });
+
+      // 3. WEB LINK THUMBNAIL CARDS (Click -> Opens strictly inside our HTML with Back Button)
+      links.forEach((lnk, idx) => {
+        let domain = lnk.url;
+        try { domain = new URL(lnk.url).hostname.replace(/^www\./, ''); } catch (_) {}
+        const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
+        const card = document.createElement('div');
+        card.className = 'media-thumb-card group relative w-44 sm:w-52 rounded-2xl overflow-hidden border-2 border-blue-200 hover:border-blue-600 bg-white shadow-sm cursor-pointer';
+        card.onclick = () => openFullscreenWebLink(lnk.url, lnk.title || domain);
+        card.innerHTML = `
+          <button onclick="event.stopPropagation(); deleteSlideMediaItem('${slideId}', 'links', ${idx})" title="Remove Link" class="opacity-0 group-hover:opacity-100 absolute top-1.5 right-1.5 z-10 w-6 h-6 rounded-full bg-rose-600 text-white text-xs font-black shadow transition">✕</button>
+          <div class="relative h-24 sm:h-28 bg-gradient-to-br from-blue-50 via-indigo-50 to-slate-100 overflow-hidden flex flex-col items-center justify-center p-2 text-center">
+            ${lnk.thumb
+              ? `<img src="${escapeHtml(lnk.thumb)}" alt="${escapeHtml(lnk.title)}" class="w-full h-full object-cover absolute inset-0 group-hover:scale-105 transition duration-300" />`
+              : `<img src="${faviconUrl}" alt="" class="w-8 h-8 rounded-lg mb-1.5 shadow-sm bg-white p-1" /><span class="text-[11px] font-extrabold text-blue-700 truncate max-w-full px-1">${escapeHtml(domain)}</span>`
+            }
+            <span class="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded-md bg-blue-700/90 text-white text-[10px] font-bold">🔗 Open Inside</span>
+          </div>
+          <div class="px-2.5 py-1.5 text-xs font-bold text-slate-800 truncate font-ml bg-blue-50/40 border-t border-blue-100">
+            🌐 ${escapeHtml(lnk.title || domain)}
+          </div>
+        `;
+        dock.appendChild(card);
+      });
+
+      secEl.appendChild(dock);
     }
 
     function getSlideTitleById(slideId) {
@@ -2079,10 +2263,15 @@ service cloud.firestore {
         savedEl.innerHTML = appState.savedImages.map((img, i) => {
           const thumbSrc = resolveImageUrl(img.url);
           return `
-            <button onclick="selectGalleryImage(${i})" class="group text-left rounded-xl overflow-hidden border border-slate-200 hover:border-blue-500 bg-white shadow-sm transition">
-              <img src="${thumbSrc}" alt="${escapeHtml(img.caption)}" class="w-full h-24 object-cover group-hover:scale-105 transition" />
-              <div class="p-2 text-[11px] font-bold text-slate-700 truncate">${escapeHtml(img.caption || 'Saved Image')}</div>
-            </button>
+            <div class="group relative rounded-xl overflow-hidden border border-slate-200 hover:border-blue-500 bg-white shadow-sm transition">
+              <button onclick="event.stopPropagation(); deleteSavedGalleryImage(${i})"
+                      title="Delete Saved Image Permanently"
+                      class="sm:opacity-0 sm:group-hover:opacity-100 absolute top-1.5 right-1.5 z-10 w-6 h-6 rounded-full bg-rose-600 hover:bg-rose-700 text-white text-xs font-black shadow flex items-center justify-center transition">✕</button>
+              <button onclick="selectGalleryImage(${i})" class="w-full text-left block">
+                <img src="${thumbSrc}" alt="${escapeHtml(img.caption)}" class="w-full h-24 object-cover group-hover:scale-105 transition" />
+                <div class="p-2 text-[11px] font-bold text-slate-700 truncate">${escapeHtml(img.caption || 'Saved Image')}</div>
+              </button>
+            </div>
           `;
         }).join('');
       }
@@ -2247,6 +2436,8 @@ service cloud.firestore {
       } else if (e.key.toLowerCase() === 'f') {
         toggleFullscreen();
       } else if (e.key === 'Escape') {
+        closeStageMediaViewer();
+        closeVideoLinkModal();
         document.getElementById('overviewModal').classList.add('hidden');
         closeSlideEditorModal();
         closeImageUploadModal();
@@ -2755,76 +2946,322 @@ service cloud.firestore {
       if (demoBtn) demoBtn.textContent = isGray ? '🌈 Restore Full Color Mode' : '⚫⚪ Test Grayscale Mode Live!';
     }
 
-    // ==================== AUTO-HIDE HEADER & FOOTER ON MOUSE EDGE TOUCH ====================
+    // ==================== HEADER & PREV/NEXT BAR: SHOW / AUTO-HIDE TOGGLE + MOUSE TOUCH ====================
+    let isHeaderPinned = localStorage.getItem('s2s_pin_header') === '1';
+    let isFooterPinned = localStorage.getItem('s2s_pin_footer') === '1';
+
+    function applyBarPinStates() {
+      const header = document.getElementById('stageHeader');
+      const footer = document.getElementById('stageFooter');
+      const hBtn = document.getElementById('toggleHeaderPinBtn');
+      const fBtn = document.getElementById('toggleFooterPinBtn');
+
+      if (header) header.classList.toggle('bar-pinned', isHeaderPinned);
+      if (footer) footer.classList.toggle('bar-pinned', isFooterPinned);
+
+      if (hBtn) {
+        hBtn.innerHTML = isHeaderPinned ? '<span>📌</span><span>Header: Shown</span>' : '<span>👁️</span><span>Header: Auto</span>';
+        hBtn.className = isHeaderPinned
+          ? 'px-2.5 py-1.5 rounded-xl bg-blue-100 hover:bg-blue-200 border border-blue-300 text-blue-800 text-xs font-bold flex items-center gap-1 transition'
+          : 'px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-bold flex items-center gap-1 transition';
+      }
+      if (fBtn) {
+        fBtn.innerHTML = isFooterPinned ? '<span>📌</span><span>Nav: Shown</span>' : '<span>👁️</span><span>Nav: Auto</span>';
+        fBtn.className = isFooterPinned
+          ? 'px-2.5 py-1.5 rounded-xl bg-blue-100 hover:bg-blue-200 border border-blue-300 text-blue-800 text-xs font-bold flex items-center gap-1 transition'
+          : 'px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-bold flex items-center gap-1 transition';
+      }
+    }
+
+    function toggleHeaderPinMode() {
+      isHeaderPinned = !isHeaderPinned;
+      localStorage.setItem('s2s_pin_header', isHeaderPinned ? '1' : '0');
+      applyBarPinStates();
+      showToast(isHeaderPinned ? 'Header Bar Pinned (Always Visible)' : 'Header Bar set to Auto-Hide (Touch top edge to show)', '👁️');
+    }
+
+    function toggleFooterPinMode() {
+      isFooterPinned = !isFooterPinned;
+      localStorage.setItem('s2s_pin_footer', isFooterPinned ? '1' : '0');
+      applyBarPinStates();
+      showToast(isFooterPinned ? 'Prev/Next Bar Pinned (Always Visible)' : 'Prev/Next Bar set to Auto-Hide (Touch bottom edge to show)', '👁️');
+    }
+
     (function setupAutoHideBars() {
       const header = document.getElementById('stageHeader');
       const footer = document.getElementById('stageFooter');
       if (!header || !footer) return;
 
-      let hideHeaderTimer = null;
-      let hideFooterTimer = null;
-      let isOverHeader = false;
-      let isOverFooter = false;
+      applyBarPinStates();
 
-      const TOP_TRIGGER_PX = 28;    // Touch top 28px edge to reveal Header
-      const BOTTOM_TRIGGER_PX = 36; // Touch bottom 36px edge to reveal Prev/Next Footer
+      let hideHeaderTimer = null, hideFooterTimer = null;
+      let isOverHeader = false, isOverFooter = false;
 
-      function showHeader() {
-        clearTimeout(hideHeaderTimer);
-        header.classList.add('bar-visible');
-      }
+      function showHeader() { clearTimeout(hideHeaderTimer); header.classList.add('bar-visible'); }
       function scheduleHideHeader() {
+        if (isHeaderPinned) return;
         clearTimeout(hideHeaderTimer);
-        hideHeaderTimer = setTimeout(() => {
-          if (!isOverHeader) header.classList.remove('bar-visible');
-        }, 350);
+        hideHeaderTimer = setTimeout(() => { if (!isOverHeader && !isHeaderPinned) header.classList.remove('bar-visible'); }, 350);
       }
 
-      function showFooter() {
-        clearTimeout(hideFooterTimer);
-        footer.classList.add('bar-visible');
-      }
+      function showFooter() { clearTimeout(hideFooterTimer); footer.classList.add('bar-visible'); }
       function scheduleHideFooter() {
+        if (isFooterPinned) return;
         clearTimeout(hideFooterTimer);
-        hideFooterTimer = setTimeout(() => {
-          if (!isOverFooter) footer.classList.remove('bar-visible');
-        }, 350);
+        hideFooterTimer = setTimeout(() => { if (!isOverFooter && !isFooterPinned) footer.classList.remove('bar-visible'); }, 350);
       }
 
-      // Keep bars visible while cursor stays on them
       header.addEventListener('mouseenter', () => { isOverHeader = true; showHeader(); });
       header.addEventListener('mouseleave', () => { isOverHeader = false; scheduleHideHeader(); });
 
       footer.addEventListener('mouseenter', () => { isOverFooter = true; showFooter(); });
       footer.addEventListener('mouseleave', () => { isOverFooter = false; scheduleHideFooter(); });
 
-      // Detect mouse pointer touching top or bottom edges of the screen
       document.addEventListener('mousemove', (e) => {
-        if (e.clientY <= TOP_TRIGGER_PX) {
-          showHeader();
-        } else if (!isOverHeader && e.clientY > header.offsetHeight + 16) {
-          scheduleHideHeader();
+        if (!isHeaderPinned) {
+          if (e.clientY <= 28) showHeader();
+          else if (!isOverHeader && e.clientY > header.offsetHeight + 16) scheduleHideHeader();
         }
-
-        if (window.innerHeight - e.clientY <= BOTTOM_TRIGGER_PX) {
-          showFooter();
-        } else if (!isOverFooter && window.innerHeight - e.clientY > footer.offsetHeight + 16) {
-          scheduleHideFooter();
+        if (!isFooterPinned) {
+          if (window.innerHeight - e.clientY <= 36) showFooter();
+          else if (!isOverFooter && window.innerHeight - e.clientY > footer.offsetHeight + 16) scheduleHideFooter();
         }
       });
 
-      // Touch-screen support (tap top or bottom edge to peek bars for 3 seconds)
+      // Touch-screen edge tap support
       document.addEventListener('touchstart', (e) => {
         const y = e.touches[0]?.clientY ?? 999;
-        if (y <= 40) {
+        if (y <= 40 && !isHeaderPinned) {
           showHeader();
           hideHeaderTimer = setTimeout(() => header.classList.remove('bar-visible'), 3500);
-        } else if (window.innerHeight - y <= 50) {
+        } else if (window.innerHeight - y <= 50 && !isFooterPinned) {
           showFooter();
           hideFooterTimer = setTimeout(() => footer.classList.remove('bar-visible'), 3500);
         }
       }, { passive: true });
     })();
+
+    // ==================== YOUTUBE VIDEO & IN-APP WEB LINK MANAGER ====================
+    function extractYouTubeId(url) {
+      const str = (url || '').trim();
+      const match = str.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/);
+      if (match) return match[1];
+      if (/^[a-zA-Z0-9_-]{11}$/.test(str)) return str;
+      return null;
+    }
+
+    function openVideoLinkModal() {
+      const activeId = appState.order[currentSlideIndex];
+      document.getElementById('vlModalTargetLabel').textContent = `Target: ${getSlideTitleById(activeId)}`;
+      document.getElementById('ytUrlInput').value = '';
+      document.getElementById('ytTitleInput').value = '';
+      document.getElementById('ytThumbPreviewBox').classList.add('hidden');
+      document.getElementById('webLinkUrlInput').value = '';
+      document.getElementById('webLinkTitleInput').value = '';
+      document.getElementById('webLinkThumbInput').value = '';
+      switchVLTab('youtube');
+      document.getElementById('videoLinkModal').classList.remove('hidden');
+    }
+
+    function closeVideoLinkModal() {
+      document.getElementById('videoLinkModal')?.classList.add('hidden');
+    }
+
+    function switchVLTab(tab) {
+      document.getElementById('vlPanel-youtube').classList.toggle('hidden', tab !== 'youtube');
+      document.getElementById('vlPanel-link').classList.toggle('hidden', tab !== 'link');
+
+      const ytBtn = document.getElementById('vlTabBtn-youtube');
+      const lnkBtn = document.getElementById('vlTabBtn-link');
+      if (tab === 'youtube') {
+        ytBtn.className = 'px-4 py-2 rounded-t-xl text-xs sm:text-sm font-bold border-b-2 border-rose-600 text-rose-700 bg-rose-50/70';
+        lnkBtn.className = 'px-4 py-2 rounded-t-xl text-xs sm:text-sm font-bold border-b-2 border-transparent text-slate-600 hover:text-slate-900';
+      } else {
+        lnkBtn.className = 'px-4 py-2 rounded-t-xl text-xs sm:text-sm font-bold border-b-2 border-blue-600 text-blue-700 bg-blue-50/70';
+        ytBtn.className = 'px-4 py-2 rounded-t-xl text-xs sm:text-sm font-bold border-b-2 border-transparent text-slate-600 hover:text-slate-900';
+      }
+    }
+
+    function previewYouTubeThumb() {
+      const id = extractYouTubeId(document.getElementById('ytUrlInput').value);
+      const box = document.getElementById('ytThumbPreviewBox');
+      if (id) {
+        document.getElementById('ytThumbPreviewImg').src = `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
+        box.classList.remove('hidden');
+      } else {
+        box.classList.add('hidden');
+      }
+    }
+
+    async function saveYouTubeToSlide() {
+      const rawUrl = document.getElementById('ytUrlInput').value.trim();
+      const videoId = extractYouTubeId(rawUrl);
+      if (!videoId) {
+        showToast('Please paste a valid YouTube video URL!', '⚠️');
+        return;
+      }
+      const title = document.getElementById('ytTitleInput').value.trim() || 'YouTube Video';
+      const slideId = appState.order[currentSlideIndex];
+
+      appState.slideMedia[slideId] = appState.slideMedia[slideId] || {};
+      appState.slideMedia[slideId].videos = appState.slideMedia[slideId].videos || [];
+      appState.slideMedia[slideId].videos.push({ videoId, title, addedAt: Date.now() });
+
+      const secEl = document.querySelector(`section[data-slide-id="${slideId}"]`);
+      if (secEl) renderSlideFeatureImage(secEl, slideId);
+      closeVideoLinkModal();
+      await persistState('YouTube Thumbnail Added');
+    }
+
+    async function saveWebLinkToSlide() {
+      let url = document.getElementById('webLinkUrlInput').value.trim();
+      if (!url) { showToast('Please enter a website URL!', '⚠️'); return; }
+      if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+
+      const title = document.getElementById('webLinkTitleInput').value.trim() || url;
+      const thumb = document.getElementById('webLinkThumbInput').value.trim();
+      const slideId = appState.order[currentSlideIndex];
+
+      appState.slideMedia[slideId] = appState.slideMedia[slideId] || {};
+      appState.slideMedia[slideId].links = appState.slideMedia[slideId].links || [];
+      appState.slideMedia[slideId].links.push({ url, title, thumb, addedAt: Date.now() });
+
+      const secEl = document.querySelector(`section[data-slide-id="${slideId}"]`);
+      if (secEl) renderSlideFeatureImage(secEl, slideId);
+      closeVideoLinkModal();
+      await persistState('Web Link Thumbnail Added');
+    }
+
+    async function deleteSlideMediaItem(slideId, listKey, index) {
+      if (!appState.slideMedia[slideId] || !Array.isArray(appState.slideMedia[slideId][listKey])) return;
+      appState.slideMedia[slideId][listKey].splice(index, 1);
+      const secEl = document.querySelector(`section[data-slide-id="${slideId}"]`);
+      if (secEl) renderSlideFeatureImage(secEl, slideId);
+      await persistState('Media Thumbnail Removed');
+    }
+
+    async function deleteSlideFeatureImage(slideId) {
+      if (!appState.slideMedia[slideId]) return;
+      delete appState.slideMedia[slideId].featureImage;
+      delete appState.slideMedia[slideId].featureCaption;
+      const secEl = document.querySelector(`section[data-slide-id="${slideId}"]`);
+      if (secEl) renderSlideFeatureImage(secEl, slideId);
+      if (!document.getElementById('overviewModal').classList.contains('hidden')) renderOverviewGrid();
+      await persistState('Slide Image Deleted');
+    }
+
+    async function deleteSavedGalleryImage(index) {
+      const removed = appState.savedImages[index];
+      if (!removed) return;
+      appState.savedImages.splice(index, 1);
+
+      // Also delete from Firestore images subcollection if stored there
+      if (isFirebaseConnected && fbDb && typeof removed.url === 'string' && removed.url.startsWith('fsimg:')) {
+        const imgId = removed.url.slice(6);
+        delete firestoreImageCache[imgId];
+        try {
+          await fbDb.collection('presentations').doc('screen-to-seen').collection('images').doc(imgId).delete();
+        } catch (err) {
+          console.warn('Could not delete Firestore image doc:', err);
+        }
+      }
+
+      renderSavedAndSuggestedGallery();
+      await persistState('Image Deleted from Library');
+    }
+
+    // ==================== FULLSCREEN STAGE MEDIA VIEWER (IMAGE / CLEAN YOUTUBE / IN-APP LINK) ====================
+    let ytIsPlaying = true;
+
+    function openFullscreenImage(src, caption) {
+      const viewer = document.getElementById('stageMediaViewer');
+      const body = document.getElementById('stageMediaBody');
+      document.getElementById('stageMediaTitle').textContent = `🖼️ ${caption}`;
+      document.getElementById('stageYtPlayPauseBtn').classList.add('hidden');
+
+      body.innerHTML = `
+        <img src="${src}" alt="${escapeHtml(caption)}" class="max-w-[96vw] max-h-[88vh] object-contain rounded-2xl shadow-2xl select-none" />
+      `;
+      viewer.classList.remove('hidden');
+    }
+
+    function openFullscreenYouTube(videoId, title) {
+      const viewer = document.getElementById('stageMediaViewer');
+      const body = document.getElementById('stageMediaBody');
+      document.getElementById('stageMediaTitle').textContent = `🎬 ${title}`;
+      const ppBtn = document.getElementById('stageYtPlayPauseBtn');
+      ppBtn.classList.remove('hidden');
+      ppBtn.textContent = '⏸ Pause';
+      ytIsPlaying = true;
+
+      // Distraction-free embed: no controls, no playlist, no next/prev, no loop, no annotations
+      const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&fs=0&loop=0&playsinline=1&enablejsapi=1`;
+
+      // Overscan top -85px & bottom -85px physically hides Author Profile, Title, Share, and "Watch on YouTube"
+      body.innerHTML = `
+        <div class="relative w-full h-full overflow-hidden bg-black flex items-center justify-center">
+          <iframe id="cleanYoutubeIframe"
+                  src="${embedUrl}"
+                  style="position: absolute; top: -85px; left: 0; width: 100%; height: calc(100% + 170px); border: 0;"
+                  allow="autoplay; encrypted-media"
+                  referrerpolicy="strict-origin-when-cross-origin"></iframe>
+
+          <!-- Transparent Click-Shield blocks all YouTube hover/click overlays -->
+          <div onclick="toggleCleanYouTubePlayPause()"
+               title="Click to Play / Pause"
+               class="absolute inset-0 z-10 cursor-pointer bg-transparent"></div>
+
+          <!-- Clean Pause Curtain (hides YouTube's "More Videos" / Author / "Watch on YouTube" when paused) -->
+          <div id="ytPausedCurtain"
+               onclick="toggleCleanYouTubePlayPause()"
+               class="hidden absolute inset-0 z-20 bg-slate-950/85 backdrop-blur-sm flex flex-col items-center justify-center cursor-pointer select-none">
+            <div class="w-20 h-20 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center text-4xl shadow-2xl mb-4 transition">▶</div>
+            <div class="text-white font-black text-xl tracking-wide">Video Paused</div>
+            <div class="text-slate-300 text-sm font-semibold mt-1">Click anywhere to resume • Press ESC or Back to return</div>
+          </div>
+        </div>
+      `;
+      viewer.classList.remove('hidden');
+    }
+
+    function toggleCleanYouTubePlayPause() {
+      const iframe = document.getElementById('cleanYoutubeIframe');
+      const btn = document.getElementById('stageYtPlayPauseBtn');
+      const curtain = document.getElementById('ytPausedCurtain');
+      if (!iframe || !iframe.contentWindow) return;
+
+      const cmd = ytIsPlaying ? 'pauseVideo' : 'playVideo';
+      iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: cmd, args: [] }), '*');
+      ytIsPlaying = !ytIsPlaying;
+
+      if (btn) btn.textContent = ytIsPlaying ? '⏸ Pause' : '▶ Play';
+      if (curtain) curtain.classList.toggle('hidden', ytIsPlaying);
+    }
+
+    function openFullscreenWebLink(url, title) {
+      const viewer = document.getElementById('stageMediaViewer');
+      const body = document.getElementById('stageMediaBody');
+      document.getElementById('stageMediaTitle').textContent = `🔗 ${title}`;
+      document.getElementById('stageYtPlayPauseBtn').classList.add('hidden');
+
+      // Opens strictly INSIDE our HTML via fullscreen iframe (no new tab!)
+      body.innerHTML = `
+        <div class="relative w-full h-full bg-white flex flex-col">
+          <iframe src="${escapeHtml(url)}"
+                  class="w-full flex-1 border-0 bg-white"
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+        </div>
+      `;
+      viewer.classList.remove('hidden');
+    }
+
+    function closeStageMediaViewer() {
+      const viewer = document.getElementById('stageMediaViewer');
+      const body = document.getElementById('stageMediaBody');
+      if (!viewer || viewer.classList.contains('hidden')) return;
+      viewer.classList.add('hidden');
+      body.innerHTML = ''; // Immediately stops YouTube audio/video and unloads iframe
+    }
 
     // ==================== BOOTSTRAP STUDIO ====================
     loadLocalState();
